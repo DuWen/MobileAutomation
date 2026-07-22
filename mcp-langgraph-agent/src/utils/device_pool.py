@@ -7,7 +7,7 @@
 import asyncio
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 
@@ -287,7 +287,6 @@ class DevicePool:
         Returns:
             成功加载的设备数量
         """
-        import json
 
         loaded_count = 0
         try:

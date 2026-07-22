@@ -7,8 +7,7 @@ MCP Server 测试模块
 
 import base64
 
-import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 from PIL import Image
 from io import BytesIO
 

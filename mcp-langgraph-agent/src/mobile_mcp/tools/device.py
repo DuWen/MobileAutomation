@@ -9,7 +9,7 @@
 
 import logging
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, Optional
 
 from appium import webdriver

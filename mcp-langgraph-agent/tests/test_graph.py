@@ -6,7 +6,7 @@ LangGraph Workflow 测试模块
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 # ============================================================
@@ -52,7 +52,6 @@ class TestAgentState:
     def test_state_list_fields_merge_with_operator_add(self):
         """测试列表字段支持 operator.add 合并"""
         from src.graph.state import AgentState
-        import operator
 
         # 验证 Annotated 类型使用 operator.add
         state = AgentState(
@@ -154,7 +153,6 @@ class TestRouteAfterVerifier:
     def test_route_to_executor_on_fail_with_retries_left(self):
         """测试验证失败但可重试时路由到 executor"""
         from src.graph.workflow import route_after_verifier
-        from langgraph.graph import END
 
         state = {
             'verification_passed': False,

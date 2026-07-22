@@ -10,9 +10,7 @@ import base64
 import logging
 from typing import Dict
 
-from io import BytesIO
 
-from PIL import Image
 
 from src.utils.screenshot import compress_screenshot as _compress_screenshot
 from src.utils.xml_compressor import compress_xml

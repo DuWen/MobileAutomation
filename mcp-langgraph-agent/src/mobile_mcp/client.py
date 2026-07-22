@@ -7,7 +7,6 @@ MCP Client 封装模块
 """
 
 import asyncio
-import importlib
 import json
 import logging
 from typing import Any, Dict, Optional
@@ -101,7 +100,7 @@ class MCPClient:
 
         try:
             from mcp import ClientSession, StdioServerParameters
-            from mcp.client.stdio import stdio_client
+            from mcp.client.stdio import stdio_client  # noqa: F401 - 验证 MCP SDK 可用性
 
             server_params = StdioServerParameters(
                 command=self.server_command,

@@ -13,7 +13,6 @@ from typing import Dict
 from mcp.server.fastmcp import FastMCP
 
 from src.config.settings import settings
-from src.utils.redact import redact_dict
 
 from .tools.assertions import AssertToolkit
 from .tools.device import DeviceManager

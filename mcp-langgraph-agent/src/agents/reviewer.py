@@ -64,7 +64,7 @@ class ReviewerAgent(BaseAgent):
             审查结果字典，包含 passed, feedback, summary 等字段
         """
         test_goal: str = kwargs.get('test_goal', '')
-        test_plan: dict = kwargs.get('test_plan', {})
+        test_plan: dict = kwargs.get('test_plan', {})  # noqa: F841 - 保留以备后续使用
         executed_steps: list = kwargs.get('executed_steps', [])
         verification_details: list = kwargs.get('verification_details', [])
         test_steps: list = kwargs.get('test_steps', [])
@@ -215,7 +215,7 @@ class ReviewerAgent(BaseAgent):
         elif all_steps_executed and not all_verifications_passed:
             overall_assessment = 'partial'
             feedback = (
-                f"部分通过。所有步骤已执行，但部分验证项未通过。"
+                "部分通过。所有步骤已执行，但部分验证项未通过。"
             )
             final_verdict = 'need_manual_check'
         else:
