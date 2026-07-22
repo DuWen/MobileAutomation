@@ -1,143 +1,619 @@
 """
 MCP Server 测试模块
 
-使用 pytest 和 pytest-asyncio 测试 MCP Server 的工具注册、设备连接和 UI 树获取等功能。
+使用 pytest 测试 MCP Server 的工具注册、设备管理和各工具包的核心功能。
+通过 mock 模拟 Appium WebDriver，避免依赖真实设备。
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+import base64
 
+import pytest
+from unittest.mock import MagicMock, patch, PropertyMock
+from PIL import Image
+from io import BytesIO
+
+
+def _create_valid_screenshot_b64(width: int = 1080, height: int = 2400) -> str:
+    """创建一个有效的截图 base64 编码字符串，用于测试。
+
+    Args:
+        width: 截图宽度（像素），默认 1080。
+        height: 截图高度（像素），默认 2400。
+
+    Returns:
+        str: PNG 格式截图的 base64 编码字符串。
+    """
+    img = Image.new("RGB", (width, height), color=(100, 150, 200))
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+
+# ============================================================
+# 辅助函数：创建 mock WebDriver
+# ============================================================
+
+def _create_mock_driver() -> MagicMock:
+    """创建一个模拟的 Appium WebDriver 实例。
+
+    Returns:
+        MagicMock: 模拟的 WebDriver 实例，预设了常用方法的返回值。
+    """
+    driver = MagicMock()
+    driver.capabilities = {
+        "platformName": "Android",
+        "platformVersion": "14",
+        "deviceName": "emulator-5554",
+        "udid": "emulator-5554",
+        "automationName": "UiAutomator2",
+        "appPackage": "com.example.app",
+        "appActivity": ".MainActivity",
+    }
+    driver.get_window_size.return_value = {"width": 1080, "height": 2400}
+    driver.page_source = '<hierarchy><node text="Hello" bounds="[0,0][1080,2400]"/></hierarchy>'
+    driver.get_screenshot_as_base64.return_value = _create_valid_screenshot_b64()
+    return driver
+
+
+# ============================================================
+# 工具注册测试
+# ============================================================
 
 class TestToolRegistration:
     """MCP 工具注册功能测试"""
 
-    @pytest.mark.asyncio
-    async def test_register_tools(self):
-        """测试 MCP 工具能否正确注册到服务器"""
-        # TODO: 实现 MCP 工具注册测试
-        # 模拟 MCP Server 实例，验证工具列表是否包含预期的工具
-        pass
+    def test_server_creates_successfully(self):
+        """测试 MCP Server 实例能否成功创建"""
+        from src.mobile_mcp.server import MobileAutomationServer
 
-    @pytest.mark.asyncio
-    async def test_tool_list_contains_expected_tools(self):
-        """测试注册的工具列表中包含预期的核心工具"""
-        # 验证工具列表包含 click、input_text、swipe、screenshot 等核心操作
-        expected_tools = {"click", "input_text", "swipe", "screenshot", "get_page_source"}
-        # TODO: 从 MCP Server 获取已注册工具列表并断言
-        pass
+        with patch("src.mobile_mcp.server.settings") as mock_settings:
+            mock_settings.APPIUM_HOST = "127.0.0.1"
+            mock_settings.APPIUM_PORT = 4723
+            mock_settings.APPIUM_BASE_PATH = "/wd/hub"
+            mock_settings.DEVICE_CONFIG_PATH = "/nonexistent/devices.yaml"
 
-    @pytest.mark.asyncio
-    async def test_tool_parameters_validation(self):
-        """测试工具参数验证是否正常工作"""
-        # TODO: 验证工具参数的类型检查和必填参数校验
-        pass
+            server = MobileAutomationServer(name="test-server")
+            assert server is not None
+            assert server.name == "test-server"
+
+    def test_device_manager_initialization(self):
+        """测试 DeviceManager 正确初始化"""
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager(appium_url="http://localhost:4723")
+        assert dm._appium_url == "http://localhost:4723"
+        assert len(dm._connections) == 0
+        assert len(dm._device_configs) == 0
+
+    def test_register_device_config(self):
+        """测试设备预配置注册"""
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        dm.register_device_config(
+            device_id="device_1",
+            name="Android 14 Emulator",
+            platform="Android",
+            udid="emulator-5554",
+            system_port=8200,
+        )
+        assert "device_1" in dm._device_configs
+        assert dm._device_configs["device_1"].platform == "Android"
+        assert dm._device_configs["device_1"].udid == "emulator-5554"
+
+    def test_register_ios_device_config(self):
+        """测试 iOS 设备预配置注册"""
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        dm.register_device_config(
+            device_id="ios_1",
+            name="iPhone 15",
+            platform="iOS",
+            udid="auto-device-id",
+            wda_port=8100,
+        )
+        assert "ios_1" in dm._device_configs
+        assert dm._device_configs["ios_1"].platform == "iOS"
 
 
-class TestDeviceConnection:
-    """移动设备连接功能测试"""
+# ============================================================
+# 设备管理测试
+# ============================================================
 
-    @pytest.mark.asyncio
-    async def test_connect_device_success(self):
+class TestDeviceManager:
+    """设备管理器功能测试"""
+
+    def test_connect_device_success(self):
         """测试成功连接移动设备"""
-        # 模拟设备连接成功场景
-        mock_device = MagicMock()
-        mock_device.is_connected.return_value = True
-        # TODO: 调用 MCP 连接设备工具并验证返回结果
-        pass
+        from src.mobile_mcp.tools.device import DeviceManager
 
-    @pytest.mark.asyncio
-    async def test_connect_device_failure(self):
+        dm = DeviceManager()
+        mock_driver = _create_mock_driver()
+
+        with patch("src.mobile_mcp.tools.device.webdriver.Remote", return_value=mock_driver):
+            result = dm.connect_device("emulator-5554")
+
+        assert result["success"] is True
+        assert "连接成功" in result["data"]["message"]
+
+    def test_connect_device_already_connected(self):
+        """测试重复连接设备返回已连接提示"""
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        mock_driver = _create_mock_driver()
+
+        with patch("src.mobile_mcp.tools.device.webdriver.Remote", return_value=mock_driver):
+            dm.connect_device("emulator-5554")
+            result = dm.connect_device("emulator-5554")
+
+        assert result["success"] is True
+        assert "已存在连接" in result["data"]["message"]
+
+    def test_connect_device_failure(self):
         """测试设备连接失败时的错误处理"""
-        # 模拟设备连接失败场景
-        # TODO: 验证返回的错误信息是否包含设备 ID 和错误原因
-        pass
+        from src.mobile_mcp.tools.device import DeviceManager
 
-    @pytest.mark.asyncio
-    async def test_disconnect_device(self):
-        """测试断开设备连接功能"""
-        # TODO: 模拟设备断开连接并验证状态变更
-        pass
+        dm = DeviceManager()
 
-    @pytest.mark.asyncio
-    async def test_list_devices(self):
-        """测试获取已连接设备列表"""
-        # TODO: 模拟多个设备连接，验证列表返回完整性
-        pass
+        with patch("src.mobile_mcp.tools.device.webdriver.Remote", side_effect=Exception("Connection refused")):
+            result = dm.connect_device("bad_device")
+
+        assert result["success"] is False
+        assert "Connection refused" in result["data"]["error"]
+
+    def test_disconnect_device_success(self):
+        """测试断开设备连接"""
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        mock_driver = _create_mock_driver()
+
+        with patch("src.mobile_mcp.tools.device.webdriver.Remote", return_value=mock_driver):
+            dm.connect_device("emulator-5554")
+            result = dm.disconnect_device("emulator-5554")
+
+        assert result["success"] is True
+        assert "已断开连接" in result["data"]["message"]
+
+    def test_disconnect_device_not_connected(self):
+        """测试断开未连接的设备"""
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        result = dm.disconnect_device("nonexistent")
+
+        assert result["success"] is False
+        assert "未连接" in result["data"]["message"]
+
+    def test_get_device_info(self):
+        """测试获取设备信息"""
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        mock_driver = _create_mock_driver()
+
+        with patch("src.mobile_mcp.tools.device.webdriver.Remote", return_value=mock_driver):
+            dm.connect_device("emulator-5554")
+            result = dm.get_device_info("emulator-5554")
+
+        assert result["success"] is True
+        assert result["data"]["platform"] == "Android"
+        assert result["data"]["screen_width"] == 1080
+
+    def test_list_devices(self):
+        """测试列出设备列表"""
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        dm.register_device_config(device_id="dev1", name="Device 1", platform="Android")
+        dm.register_device_config(device_id="dev2", name="Device 2", platform="iOS")
+
+        result = dm.list_devices()
+        assert result["success"] is True
+        assert len(result["data"]["configured"]) == 2
+        assert len(result["data"]["connected"]) == 0
+
+    def test_build_android_capabilities(self):
+        """测试构建 Android Capabilities"""
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        dm.register_device_config(
+            device_id="android_1",
+            name="Pixel 7",
+            platform="Android",
+            udid="emulator-5554",
+        )
+        options = dm._build_capabilities("android_1")
+        assert options is not None
+
+    def test_build_ios_capabilities(self):
+        """测试构建 iOS Capabilities"""
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        dm.register_device_config(
+            device_id="ios_1",
+            name="iPhone 15",
+            platform="iOS",
+            udid="auto-device-id",
+        )
+        options = dm._build_capabilities("ios_1")
+        assert options is not None
+
+    def test_build_default_capabilities(self):
+        """测试无预配置时构建默认 Capabilities"""
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        options = dm._build_capabilities("unknown_device")
+        assert options is not None
+
+    def test_disconnect_all(self):
+        """测试断开所有设备"""
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        mock_driver = _create_mock_driver()
+
+        with patch("src.mobile_mcp.tools.device.webdriver.Remote", return_value=mock_driver):
+            dm.connect_device("dev1")
+            dm.connect_device("dev2")
+            result = dm.disconnect_all()
+
+        assert result["success"] is True
+        assert result["data"]["disconnected_count"] == 2
 
 
-class TestUITree:
-    """UI 树获取功能测试"""
+# ============================================================
+# UI 交互测试
+# ============================================================
 
-    @pytest.mark.asyncio
-    async def test_get_ui_tree(self):
-        """测试获取当前页面 UI 树结构"""
-        # TODO: 模拟设备返回 XML 格式的 UI 树，验证解析结果
-        pass
+class TestUIToolkit:
+    """UI 交互操作测试"""
 
-    @pytest.mark.asyncio
-    async def test_get_ui_tree_with_empty_page(self):
-        """测试空白页面的 UI 树获取"""
-        # TODO: 验证空白页面返回空树结构而非错误
-        pass
+    def _setup_toolkit(self):
+        """创建带 mock driver 的 UIToolkit 实例。"""
+        from src.mobile_mcp.tools.ui import UIToolkit
+        from src.mobile_mcp.tools.device import DeviceManager
 
-    @pytest.mark.asyncio
-    async def test_find_element_by_xpath(self):
-        """测试通过 XPath 查找 UI 元素"""
-        # TODO: 模拟 UI 树中特定 XPath 的查找并验证结果
-        pass
+        dm = DeviceManager()
+        mock_driver = _create_mock_driver()
+        dm._connections["test_device"] = mock_driver
+        toolkit = UIToolkit(dm)
+        return toolkit, mock_driver
 
-    @pytest.mark.asyncio
-    async def test_find_element_by_accessibility_id(self):
-        """测试通过 Accessibility ID 查找 UI 元素"""
-        # TODO: 模拟 UI 树中特定 Accessibility ID 的查找并验证结果
-        pass
+    def test_tap_element_success(self):
+        """测试点击坐标操作"""
+        toolkit, mock_driver = self._setup_toolkit()
+        result = toolkit.tap_element("test_device", 540, 1200)
+        assert result["success"] is True
+        mock_driver.execute_script.assert_called_once()
 
+    def test_tap_element_device_not_connected(self):
+        """测试点击未连接设备"""
+        from src.mobile_mcp.tools.ui import UIToolkit
+        from src.mobile_mcp.tools.device import DeviceManager
 
-class TestElementInteraction:
-    """UI 元素交互操作测试"""
+        dm = DeviceManager()
+        toolkit = UIToolkit(dm)
+        result = toolkit.tap_element("nonexistent", 540, 1200)
+        assert result["success"] is False
 
-    @pytest.mark.asyncio
-    async def test_click_element(self):
-        """测试点击 UI 元素操作"""
-        # TODO: 模拟点击操作并验证元素是否被触发
-        pass
+    def test_tap_by_text_success(self):
+        """测试通过文本点击"""
+        toolkit, mock_driver = self._setup_toolkit()
+        mock_element = MagicMock()
+        mock_driver.find_element.return_value = mock_element
 
-    @pytest.mark.asyncio
-    async def test_input_text(self):
+        result = toolkit.tap_by_text("test_device", "登录")
+        assert result["success"] is True
+        mock_element.click.assert_called_once()
+
+    def test_tap_by_text_not_found(self):
+        """测试点击不存在的文本"""
+        toolkit, mock_driver = self._setup_toolkit()
+        from selenium.common.exceptions import NoSuchElementException
+        mock_driver.find_element.side_effect = NoSuchElementException()
+
+        result = toolkit.tap_by_text("test_device", "不存在")
+        assert result["success"] is False
+
+    def test_input_text_success(self):
         """测试输入文本操作"""
-        # TODO: 模拟输入框输入文本并验证文本内容是否正确
-        pass
+        toolkit, mock_driver = self._setup_toolkit()
+        mock_element = MagicMock()
+        mock_driver.find_element.return_value = mock_element
 
-    @pytest.mark.asyncio
-    async def test_swipe_screen(self):
-        """测试屏幕滑动操作"""
-        # TODO: 模拟滑动操作并验证坐标参数是否正确传递
-        pass
+        result = toolkit.input_text("test_device", "username_field", "testuser")
+        assert result["success"] is True
+        mock_element.clear.assert_called_once()
+        mock_element.send_keys.assert_called_once_with("testuser")
 
-    @pytest.mark.asyncio
-    async def test_screenshot(self):
-        """测试页面截图功能"""
-        # TODO: 模拟截图操作并验证返回的图片数据格式
-        pass
+    def test_swipe_success(self):
+        """测试滑动操作"""
+        toolkit, mock_driver = self._setup_toolkit()
+        result = toolkit.swipe("test_device", 540, 2000, 540, 500)
+        assert result["success"] is True
+        mock_driver.execute_script.assert_called_once()
 
+    def test_long_press_success(self):
+        """测试长按操作"""
+        toolkit, mock_driver = self._setup_toolkit()
+        result = toolkit.long_press("test_device", 540, 1200, duration=1500)
+        assert result["success"] is True
+        mock_driver.execute_script.assert_called_once()
+
+    def test_press_key_back(self):
+        """测试按下返回键"""
+        toolkit, mock_driver = self._setup_toolkit()
+        result = toolkit.press_key("test_device", "back")
+        assert result["success"] is True
+        mock_driver.press_keycode.assert_called_once_with(4)
+
+    def test_press_key_home(self):
+        """测试按下 Home 键"""
+        toolkit, mock_driver = self._setup_toolkit()
+        result = toolkit.press_key("test_device", "home")
+        assert result["success"] is True
+        mock_driver.press_keycode.assert_called_once_with(3)
+
+    def test_press_key_invalid(self):
+        """测试按下不支持的按键"""
+        toolkit, mock_driver = self._setup_toolkit()
+        result = toolkit.press_key("test_device", "invalid_key")
+        assert result["success"] is False
+        assert "不支持" in result["data"]["message"]
+
+    def test_scroll_down(self):
+        """测试向下滚动"""
+        toolkit, mock_driver = self._setup_toolkit()
+        result = toolkit.scroll("test_device", "down", 0.5)
+        assert result["success"] is True
+        mock_driver.execute_script.assert_called_once()
+
+    def test_scroll_invalid_direction(self):
+        """测试无效的滚动方向"""
+        toolkit, mock_driver = self._setup_toolkit()
+        result = toolkit.scroll("test_device", "diagonal")
+        assert result["success"] is False
+
+    def test_wait_for_element_success(self):
+        """测试等待元素出现"""
+        toolkit, mock_driver = self._setup_toolkit()
+        mock_element = MagicMock()
+        mock_element.tag_name = "android.widget.Button"
+        mock_element.text = "确定"
+        mock_element.location = {"x": 100, "y": 200}
+        mock_element.size = {"width": 200, "height": 50}
+        mock_element.is_displayed.return_value = True
+        mock_element.is_enabled.return_value = True
+        mock_element.is_selected.return_value = False
+        mock_element.get_attribute.return_value = "confirm_btn"
+
+        with patch("src.mobile_mcp.tools.ui.WebDriverWait") as MockWait:
+            MockWait.return_value.until.return_value = mock_element
+            result = toolkit.wait_for_element(
+                "test_device", {"by": "accessibility_id", "value": "btn_ok"}
+            )
+
+        assert result["success"] is True
+        assert result["data"]["element"]["text"] == "确定"
+
+
+# ============================================================
+# 视觉工具测试
+# ============================================================
+
+class TestVisionToolkit:
+    """视觉工具功能测试"""
+
+    def _setup_toolkit(self):
+        """创建带 mock driver 的 VisionToolkit 实例。"""
+        from src.mobile_mcp.tools.vision import VisionToolkit
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        mock_driver = _create_mock_driver()
+        dm._connections["test_device"] = mock_driver
+        toolkit = VisionToolkit(dm)
+        return toolkit, mock_driver
+
+    def test_take_screenshot_success(self):
+        """测试截图功能"""
+        toolkit, mock_driver = self._setup_toolkit()
+
+        # mock compress_screenshot 返回一个有效的小型 base64 图片
+        tiny_b64 = _create_valid_screenshot_b64(width=10, height=10)
+        with patch("src.mobile_mcp.tools.vision._compress_screenshot", return_value=tiny_b64):
+            result = toolkit.take_screenshot("test_device")
+
+        assert result["success"] is True
+        assert "screenshot" in result["data"]
+
+    def test_take_screenshot_device_not_connected(self):
+        """测试未连接设备截图"""
+        from src.mobile_mcp.tools.vision import VisionToolkit
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        toolkit = VisionToolkit(dm)
+        result = toolkit.take_screenshot("nonexistent")
+        assert result["success"] is False
+
+    def test_get_ui_tree_compressed(self):
+        """测试获取压缩后的 UI 树"""
+        toolkit, mock_driver = self._setup_toolkit()
+
+        with patch("src.mobile_mcp.tools.vision.compress_xml", return_value='{"compressed_tree": {}}'):
+            result = toolkit.get_ui_tree("test_device", compress=True)
+
+        assert result["success"] is True
+        assert result["data"]["compressed"] is True
+        assert result["data"]["format"] == "json"
+
+    def test_get_ui_tree_raw(self):
+        """测试获取原始 UI 树"""
+        toolkit, mock_driver = self._setup_toolkit()
+        result = toolkit.get_ui_tree("test_device", compress=False)
+
+        assert result["success"] is True
+        assert result["data"]["compressed"] is False
+        assert result["data"]["format"] == "xml"
+
+
+# ============================================================
+# 断言工具测试
+# ============================================================
+
+class TestAssertToolkit:
+    """断言工具功能测试"""
+
+    def _setup_toolkit(self):
+        """创建带 mock driver 的 AssertToolkit 实例。"""
+        from src.mobile_mcp.tools.assertions import AssertToolkit
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        mock_driver = _create_mock_driver()
+        dm._connections["test_device"] = mock_driver
+        toolkit = AssertToolkit(dm)
+        return toolkit, mock_driver
+
+    def test_assert_text_visible_success(self):
+        """测试文本可见性断言通过"""
+        toolkit, mock_driver = self._setup_toolkit()
+        mock_element = MagicMock()
+
+        with patch("src.mobile_mcp.tools.assertions.WebDriverWait") as MockWait:
+            MockWait.return_value.until.return_value = mock_element
+            result = toolkit.assert_text_visible("test_device", "登录", timeout=5)
+
+        assert result["success"] is True
+        assert "断言通过" in result["data"]["message"]
+
+    def test_assert_text_visible_timeout(self):
+        """测试文本可见性断言超时"""
+        toolkit, mock_driver = self._setup_toolkit()
+        from selenium.common.exceptions import TimeoutException
+
+        with patch("src.mobile_mcp.tools.assertions.WebDriverWait") as MockWait:
+            MockWait.return_value.until.side_effect = TimeoutException()
+            result = toolkit.assert_text_visible("test_device", "不存在", timeout=3)
+
+        assert result["success"] is False
+        assert "断言失败" in result["data"]["message"]
+
+    def test_assert_element_exists_success(self):
+        """测试元素存在性断言通过"""
+        toolkit, mock_driver = self._setup_toolkit()
+        mock_element = MagicMock()
+        mock_element.text = "确定"
+        mock_element.is_displayed.return_value = True
+        mock_driver.find_element.return_value = mock_element
+
+        result = toolkit.assert_element_exists(
+            "test_device", {"by": "accessibility_id", "value": "btn_ok"}
+        )
+        assert result["success"] is True
+
+    def test_assert_element_exists_not_found(self):
+        """测试元素不存在断言失败"""
+        toolkit, mock_driver = self._setup_toolkit()
+        from selenium.common.exceptions import NoSuchElementException
+        mock_driver.find_element.side_effect = NoSuchElementException()
+
+        result = toolkit.assert_element_exists(
+            "test_device", {"by": "xpath", "value": "//nonexistent"}
+        )
+        assert result["success"] is False
+
+    def test_assert_page_contains_success(self):
+        """测试页面内容断言通过"""
+        toolkit, mock_driver = self._setup_toolkit()
+        mock_driver.page_source = '<node text="Welcome" bounds="[0,0][100,100]"/>'
+
+        result = toolkit.assert_page_contains("test_device", "Welcome")
+        assert result["success"] is True
+
+    def test_assert_page_contains_failure(self):
+        """测试页面内容断言失败"""
+        toolkit, mock_driver = self._setup_toolkit()
+        mock_driver.page_source = '<node text="Hello" bounds="[0,0][100,100]"/>'
+
+        result = toolkit.assert_page_contains("test_device", "Goodbye")
+        assert result["success"] is False
+
+    def test_assert_device_not_connected(self):
+        """测试设备未连接时的断言"""
+        from src.mobile_mcp.tools.assertions import AssertToolkit
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        toolkit = AssertToolkit(dm)
+        result = toolkit.assert_text_visible("nonexistent", "test")
+        assert result["success"] is False
+        assert "未连接" in result["data"]["message"]
+
+
+# ============================================================
+# 错误处理测试
+# ============================================================
 
 class TestErrorHandling:
     """MCP Server 错误处理测试"""
 
-    @pytest.mark.asyncio
-    async def test_device_not_found_error(self):
+    def test_device_not_found(self):
         """测试设备未找到时的错误处理"""
-        # TODO: 验证不存在的设备 ID 返回合适错误信息
-        pass
+        from src.mobile_mcp.tools.device import DeviceManager
 
-    @pytest.mark.asyncio
-    async def test_timeout_error(self):
-        """测试操作超时时的错误处理"""
-        # TODO: 模拟超时场景并验证超时错误处理逻辑
-        pass
+        dm = DeviceManager()
+        result = dm.get_device_info("nonexistent")
+        assert result["success"] is False
+        assert "未连接" in result["data"]["message"]
 
-    @pytest.mark.asyncio
-    async def test_invalid_parameters_error(self):
-        """测试无效参数传递时的错误处理"""
-        # TODO: 验证无效参数返回格式化的错误提示
-        pass
+    def test_ui_toolkit_device_not_connected(self):
+        """测试 UI 操作时设备未连接"""
+        from src.mobile_mcp.tools.ui import UIToolkit
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        toolkit = UIToolkit(dm)
+        result = toolkit.tap_element("nonexistent", 0, 0)
+        assert result["success"] is False
+
+    def test_vision_toolkit_device_not_connected(self):
+        """测试视觉操作时设备未连接"""
+        from src.mobile_mcp.tools.vision import VisionToolkit
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        toolkit = VisionToolkit(dm)
+        result = toolkit.get_ui_tree("nonexistent")
+        assert result["success"] is False
+
+    def test_assert_toolkit_device_not_connected(self):
+        """测试断言操作时设备未连接"""
+        from src.mobile_mcp.tools.assertions import AssertToolkit
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        toolkit = AssertToolkit(dm)
+        result = toolkit.assert_element_exists("nonexistent", {"by": "xpath", "value": "//test"})
+        assert result["success"] is False
+
+    def test_input_text_missing_selector_value(self):
+        """测试 wait_for_element 缺少 value 字段"""
+        from src.mobile_mcp.tools.ui import UIToolkit
+        from src.mobile_mcp.tools.device import DeviceManager
+
+        dm = DeviceManager()
+        mock_driver = _create_mock_driver()
+        dm._connections["test_device"] = mock_driver
+        toolkit = UIToolkit(dm)
+
+        result = toolkit.wait_for_element("test_device", {"by": "xpath"})
+        assert result["success"] is False
+        assert "缺少" in result["data"]["message"]

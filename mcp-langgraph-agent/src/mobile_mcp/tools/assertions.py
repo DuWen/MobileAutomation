@@ -1,10 +1,12 @@
 """
 断言工具模块
 
-提供测试断言相关的功能，包括文本可见性断言、元素存在性断言
-以及元素等待功能。使用 Appium 的 WebDriverWait 实现显式等待机制。
+提供测试断言相关的功能，包括文本可见性断言、元素存在性断言、
+页面内容断言以及元素等待功能。使用 Appium 的 WebDriverWait
+实现显式等待机制。
 """
 
+import logging
 from typing import Dict, Optional
 
 from appium.webdriver.common.appiumby import AppiumBy
@@ -18,12 +20,14 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 from .device import DeviceManager
 
+logger = logging.getLogger(__name__)
+
 
 class AssertToolkit:
     """断言工具包，提供 UI 测试断言方法。
 
-    封装了基于 Appium WebDriver 的文本可见性断言、元素存在性断言
-    和元素等待功能，支持超时配置和多种定位策略。
+    封装了基于 Appium WebDriver 的文本可见性断言、元素存在性断言、
+    页面内容断言和元素等待功能，支持超时配置和多种定位策略。
     """
 
     # 默认轮询间隔（秒）
@@ -36,6 +40,20 @@ class AssertToolkit:
             device_manager: 设备管理器实例，用于获取设备 WebDriver。
         """
         self._device_manager = device_manager
+
+    def _check_device(self, device_name: str) -> Optional[WebDriver]:
+        """检查设备是否已连接并返回 WebDriver 实例。
+
+        Args:
+            device_name: 设备名称/标识符。
+
+        Returns:
+            WebDriver 实例，设备未连接时返回 None。
+        """
+        driver = self._device_manager.get_driver(device_name)
+        if driver is None:
+            logger.warning("设备 '%s' 未连接", device_name)
+        return driver
 
     def assert_text_visible(
         self, device_name: str, text: str, timeout: int = 10
@@ -56,27 +74,16 @@ class AssertToolkit:
                 - data.message: 断言结果描述
                 - data.text: 目标文本
         """
-        driver = self._device_manager.get_driver(device_name)
+        driver = self._check_device(device_name)
         if driver is None:
             return {
                 "success": False,
-                "data": {
-                    "message": f"断言失败：设备 '{device_name}' 未连接",
-                    "text": text,
-                    "assertion": "text_visible",
-                },
+                "data": {"message": f"断言失败：设备 '{device_name}' 未连接", "text": text, "assertion": "text_visible"},
             }
 
         try:
-            # 使用 WebDriverWait 等待文本出现
-            wait = WebDriverWait(
-                driver, timeout, poll_frequency=self.DEFAULT_POLL_FREQUENCY
-            )
-
-            # 使用 xpath 查找包含指定文本的元素
+            wait = WebDriverWait(driver, timeout, poll_frequency=self.DEFAULT_POLL_FREQUENCY)
             xpath = f'//*[contains(@text, "{text}") or contains(@content-desc, "{text}")]'
-
-            # 等待元素存在
             wait.until(ec.presence_of_element_located((AppiumBy.XPATH, xpath)))
 
             return {
@@ -130,33 +137,23 @@ class AssertToolkit:
                 - data.message: 断言结果描述
                 - data.selector: 使用的选择器
         """
-        driver = self._device_manager.get_driver(device_name)
+        driver = self._check_device(device_name)
         if driver is None:
             return {
                 "success": False,
-                "data": {
-                    "message": f"断言失败：设备 '{device_name}' 未连接",
-                    "selector": selector,
-                    "assertion": "element_exists",
-                },
+                "data": {"message": f"断言失败：设备 '{device_name}' 未连接", "selector": selector, "assertion": "element_exists"},
             }
 
         try:
-            # 解析选择器
             by = self._parse_by_strategy(selector.get("by", "xpath"))
             value = selector.get("value", "")
 
             if not value:
                 return {
                     "success": False,
-                    "data": {
-                        "message": "断言失败：选择器缺少 'value' 字段",
-                        "selector": selector,
-                        "assertion": "element_exists",
-                    },
+                    "data": {"message": "断言失败：选择器缺少 'value' 字段", "selector": selector, "assertion": "element_exists"},
                 }
 
-            # 查找元素
             element = driver.find_element(by, value)
 
             return {
@@ -174,7 +171,7 @@ class AssertToolkit:
             return {
                 "success": False,
                 "data": {
-                    "message": f"断言失败：元素 '{value}' 不存在",
+                    "message": f"断言失败：元素 '{selector.get('value', '')}' 不存在",
                     "selector": selector,
                     "assertion": "element_exists",
                 },
@@ -187,6 +184,61 @@ class AssertToolkit:
                     "selector": selector,
                     "error": str(e),
                     "assertion": "element_exists",
+                },
+            }
+
+    def assert_page_contains(
+        self, device_name: str, text: str
+    ) -> Dict:
+        """断言当前页面源包含指定文本内容。
+
+        通过检查页面源（page source）中是否包含目标文本进行断言，
+        适用于 UI 树中不可见但 DOM 中存在的元素验证。
+
+        Args:
+            device_name: 设备名称/标识符。
+            text: 要断言的文本内容。
+
+        Returns:
+            Dict: 断言结果，包含 success 和 data 字段。
+                - success: True 表示页面包含目标文本（断言通过）
+        """
+        driver = self._check_device(device_name)
+        if driver is None:
+            return {
+                "success": False,
+                "data": {"message": f"断言失败：设备 '{device_name}' 未连接", "text": text, "assertion": "page_contains"},
+            }
+
+        try:
+            page_source = driver.page_source
+
+            if text in page_source:
+                return {
+                    "success": True,
+                    "data": {
+                        "message": f"断言通过：页面源包含文本 '{text}'",
+                        "text": text,
+                        "assertion": "page_contains",
+                    },
+                }
+            else:
+                return {
+                    "success": False,
+                    "data": {
+                        "message": f"断言失败：页面源不包含文本 '{text}'",
+                        "text": text,
+                        "assertion": "page_contains",
+                    },
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "data": {
+                    "message": f"断言页面内容时发生错误: {str(e)}",
+                    "text": text,
+                    "error": str(e),
+                    "assertion": "page_contains",
                 },
             }
 
@@ -212,39 +264,26 @@ class AssertToolkit:
                 - data.message: 等待结果描述
                 - data.selector: 使用的选择器
         """
-        driver = self._device_manager.get_driver(device_name)
+        driver = self._check_device(device_name)
         if driver is None:
             return {
                 "success": False,
-                "data": {
-                    "message": f"等待失败：设备 '{device_name}' 未连接",
-                    "selector": selector,
-                },
+                "data": {"message": f"等待失败：设备 '{device_name}' 未连接", "selector": selector},
             }
 
         try:
-            # 解析选择器
             by = self._parse_by_strategy(selector.get("by", "xpath"))
             value = selector.get("value", "")
 
             if not value:
                 return {
                     "success": False,
-                    "data": {
-                        "message": "等待失败：选择器缺少 'value' 字段",
-                        "selector": selector,
-                    },
+                    "data": {"message": "等待失败：选择器缺少 'value' 字段", "selector": selector},
                 }
 
-            # 使用 WebDriverWait 等待元素可见
-            wait = WebDriverWait(
-                driver, timeout, poll_frequency=self.DEFAULT_POLL_FREQUENCY
-            )
-            element = wait.until(
-                ec.visibility_of_element_located((by, value))
-            )
+            wait = WebDriverWait(driver, timeout, poll_frequency=self.DEFAULT_POLL_FREQUENCY)
+            element = wait.until(ec.visibility_of_element_located((by, value)))
 
-            # 获取元素信息
             element_info = {
                 "tag": element.tag_name,
                 "text": element.text,
@@ -268,7 +307,7 @@ class AssertToolkit:
             return {
                 "success": False,
                 "data": {
-                    "message": f"等待超时：元素 '{value}' 在 {timeout} 秒内未出现",
+                    "message": f"等待超时：元素 '{selector.get('value', '')}' 在 {timeout} 秒内未出现",
                     "selector": selector,
                     "timeout": timeout,
                 },
