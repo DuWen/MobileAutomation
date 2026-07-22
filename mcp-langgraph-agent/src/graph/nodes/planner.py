@@ -1,29 +1,53 @@
-"""
-规划节点模块。
+"""规划节点模块。
 
-基于探索结果生成详细的测试步骤计划，
+调用 PlannerAgent 基于探索结果生成详细的测试步骤计划，
 将自然语言测试目标转换为可执行的步骤序列。
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from src.graph.state import AgentState
-from src.agents.prompts import PLANNER_PROMPT
+from src.agents.planner import PlannerAgent
+from src.agents.llm import ModelRouter
+from src.utils.token_tracker import TokenTracker
 
 logger = logging.getLogger(__name__)
 
+# 全局 Agent 实例缓存（延迟初始化）
+_planner_agent: PlannerAgent | None = None
+
+
+def get_planner_agent(
+    model_router: ModelRouter | None = None,
+    token_tracker: TokenTracker | None = None,
+) -> PlannerAgent:
+    """获取或创建 PlannerAgent 单例。
+
+    延迟初始化模式，首次调用时创建实例，后续复用。
+
+    Args:
+        model_router: 模型路由实例
+        token_tracker: Token 追踪器实例
+
+    Returns:
+        PlannerAgent 实例
+    """
+    global _planner_agent
+    if _planner_agent is None:
+        _planner_agent = PlannerAgent(
+            model_router=model_router,
+            token_tracker=token_tracker,
+        )
+    return _planner_agent
+
 
 async def planner_node(state: AgentState) -> Dict[str, Any]:
-    """
-    规划节点的主函数。
+    """规划节点的主函数。
 
-    该节点负责：
-    1. 接收探索节点的输出（对测试目标的理解和界面分析）
-    2. 调用 LLM 生成结构化的测试步骤计划
-    3. 输出 test_plan（包含步骤列表和预期结果）
+    调用 PlannerAgent 生成结构化测试步骤计划。
 
     Args:
         state: 当前 Agent 状态，包含 test_goal、node_outputs 等字段。
@@ -33,63 +57,52 @@ async def planner_node(state: AgentState) -> Dict[str, Any]:
             - test_plan: 生成的测试计划
             - test_steps: 生成的测试步骤列表
             - current_step_index: 重置为 0
+            - retry_count: 重置为 0（新计划开始）
             - node_outputs: 更新后的节点输出缓存
             - messages: 新增的对话消息
             - total_tokens_used: 本轮消耗的 Token 数
     """
     logger.info("[Planner] 开始规划测试步骤")
 
-    # 从状态中提取探索结果
-    test_goal: str = state.get("test_goal", "")
-    explorer_output: dict = state.get("node_outputs", {}).get("explorer", {})
+    # 获取 Agent 实例
+    agent: PlannerAgent = get_planner_agent()
 
-    # 构建 LLM 调用消息序列，使用 prompts.py 中的模板
-    messages = [
-        {
-            "role": "system",
-            "content": PLANNER_PROMPT.format(
-                test_goal=test_goal,
-                ui_tree=state.get("ui_tree", ""),
-                screenshot_description="有截图" if state.get("screenshot_b64") else "无截图",
-                exploration_result=str(explorer_output),
-            ),
-        },
-    ]
+    # 提取探索结果
+    explorer_output: dict = state.get('node_outputs', {}).get('explorer', {})
 
-    # TODO: 在此处调用 LLM API 生成真实的测试计划
-    # 当前为模拟实现，返回占位测试计划
-    test_steps: List[str] = [
-        f"步骤 1: 打开应用并进入目标功能页面",
-        f"步骤 2: 执行核心操作 - {test_goal}",
-        f"步骤 3: 验证操作结果是否符合预期",
-        f"步骤 4: 恢复初始状态或清理",
-    ]
+    # 调用 Agent 执行规划
+    plan_result: Dict[str, Any] = await agent.run(
+        test_goal=state.get('test_goal', ''),
+        ui_tree=state.get('ui_tree', ''),
+        screenshot_b64=state.get('screenshot_b64', ''),
+        exploration_result=explorer_output,
+    )
 
-    test_plan: dict = {
-        "goal": test_goal,
-        "steps": test_steps,
-        "expected_results": [
-            "应用正常打开，目标功能页面可见",
-            "核心操作执行成功，无异常",
-            "结果与预期一致",
-            "状态恢复成功",
-        ],
-        "estimated_duration": "5 分钟",
-    }
+    # 提取测试计划和步骤
+    test_plan: dict = plan_result.get('test_plan', {})
+    test_steps: list = plan_result.get('test_steps', [])
+
+    # 获取本轮 Token 消耗
+    token_summary: Dict[str, Any] = agent.get_token_summary()
+    tokens_used: int = token_summary.get('total_tokens', 0)
 
     logger.info(f"[Planner] 规划完成，共 {len(test_steps)} 个步骤")
 
     return {
-        "test_plan": test_plan,
-        "test_steps": test_steps,
-        "current_step_index": 0,
-        "node_outputs": {
-            **state.get("node_outputs", {}),
-            "planner": test_plan,
+        'test_plan': test_plan,
+        'test_steps': test_steps,
+        'current_step_index': 0,
+        'retry_count': 0,
+        'node_outputs': {
+            **state.get('node_outputs', {}),
+            'planner': test_plan,
         },
-        "messages": [
-            *state.get("messages", []),
-            {"role": "assistant", "content": f"规划节点完成，生成 {len(test_steps)} 个测试步骤"},
+        'messages': [
+            *state.get('messages', []),
+            {
+                'role': 'assistant',
+                'content': f"规划完成，生成 {len(test_steps)} 个测试步骤",
+            },
         ],
-        "total_tokens_used": state.get("total_tokens_used", 0) + 0,
+        'total_tokens_used': state.get('total_tokens_used', 0) + tokens_used,
     }
