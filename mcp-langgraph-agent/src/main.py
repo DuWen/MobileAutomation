@@ -133,18 +133,20 @@ async def init_device_pool() -> None:
 
 
 async def init_mcp_server() -> None:
-    """初始化 MCP Server 连接
+    """初始化 MCP Server
 
-    根据配置的传输层协议（stdio/http）建立与 MCP Server 的连接。
-    当前为占位实现，后续接入真实的 MCP SDK。
+    创建 MobileAutomationServer 实例，从配置加载设备列表，
+    为后续通过 MCP 协议调用工具做准备。
     """
+    from src.mobile_mcp.server import create_server
+
     logger.info(
         f"MCP Server 初始化中: host={settings.MCP_SERVER_HOST}, "
         f"port={settings.MCP_SERVER_PORT}, transport={settings.MCP_TRANSPORT}"
     )
-    # TODO: 接入真实的 MCP Client 初始化逻辑
-    await asyncio.sleep(0.1)
-    logger.info("MCP Server 连接已建立（模拟）")
+    # 创建 MCP Server 实例（暂不启动，等待客户端连接或独立进程运行）
+    app.state.mcp_server = create_server()
+    logger.info("MCP Server 实例已创建，注册工具数: %d", len(app.state.mcp_server._tool_manager._tools))
 
 
 async def init_langgraph_workflow() -> None:
