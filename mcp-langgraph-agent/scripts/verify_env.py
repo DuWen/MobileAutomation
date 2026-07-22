@@ -17,7 +17,6 @@ Phase 1 环境验证脚本
 import importlib
 import json
 import os
-import platform
 import shutil
 import subprocess
 import sys
@@ -292,7 +291,7 @@ def check_connected_devices() -> CheckResult:
             )
             lines = result.stdout.strip().split('\n')
             for line in lines[1:]:
-                if "device" in line and not "List of devices" in line:
+                if "device" in line and "List of devices" not in line:
                     device_id = line.split()[0]
                     connected_devices.append(f"Android: {device_id}")
         except Exception:
@@ -384,7 +383,7 @@ def verify_appium_connect_and_get_source() -> CheckResult:
         lines = result.stdout.strip().split('\n')
         device_id = None
         for line in lines[1:]:
-            if "device" in line and not "List of devices" in line:
+            if "device" in line and "List of devices" not in line:
                 device_id = line.split()[0]
                 break
 
@@ -502,7 +501,7 @@ def verify_utils_modules() -> CheckResult:
     """验证工具模块能否正常加载"""
     try:
         from src.utils.xml_compressor import compress_xml
-        from src.utils.screenshot import compress_screenshot
+        from src.utils.screenshot import compress_screenshot  # noqa: F401 - 验证模块可导入
         from src.utils.redact import redact_sensitive
         from src.utils.token_tracker import TokenTracker
 
