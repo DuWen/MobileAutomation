@@ -1,0 +1,93 @@
+"""
+本地开发环境 Docker Compose 配置
+
+定义 MCP Server、LangGraph Agent、Redis 和 PostgreSQL 服务，
+用于本地开发和调试移动端自动化测试系统。
+"""
+
+version: "3.8"
+
+services:
+  # MCP 协议服务 - 提供移动端自动化测试工具调用
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    container_name: mcp-server
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/mobile_automation
+    volumes:
+      - ./src:/app/src
+    depends_on:
+      - redis
+      - postgres
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # LangGraph Agent 服务 - 编排自动化测试流程
+  langgraph-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.langgraph
+    container_name: langgraph-agent
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    environment:
+      - MCP_SERVER_URL=http://mcp-server:8000
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/mobile_automation
+    volumes:
+      - ./src:/app/src
+    depends_on:
+      - mcp-server
+      - redis
+      - postgres
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Redis 缓存服务 - 用于任务队列和状态缓存
+  redis:
+    image: redis:7-alpine
+    container_name: mcp-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # PostgreSQL 数据库服务 - 持久化存储测试数据和报告
+  postgres:
+    image: postgres:15-alpine
+    container_name: mcp-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=mobile_automation
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - app-network
+
+volumes:
+  redis-data:
+    driver: local
+  postgres-data:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge
