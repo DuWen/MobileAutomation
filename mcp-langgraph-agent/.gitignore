@@ -48,3 +48,15 @@ docker-volumes/
 # Local config overrides
 .env.local
 .env.production
+
+# Runtime directories
+logs/
+reports/
+screenshots/
+data/
+
+# Type checking cache
+.mypy_cache/
+
+# Ruff cache
+.ruff_cache/
