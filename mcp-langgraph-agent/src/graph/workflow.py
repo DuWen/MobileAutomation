@@ -1,7 +1,7 @@
 """
 LangGraph 工作流构建模块。
 
-构建完整的 StateGraph，包含 5 个节点（explore, planner, executor, verifier, reviewer）
+构建完整的 StateGraph，包含 5 个节点（explorer, planner, executor, verifier, reviewer）
 以及条件路由逻辑，实现端到端的移动端自动化测试流程。
 """
 
@@ -27,8 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 def route_after_verifier(state: AgentState) -> Literal["executor", "reviewer", "__end__"]:
-    """
-    验证节点后的路由决策函数。
+    """验证节点后的路由决策函数。
 
     根据验证结果和重试次数决定下一步走向：
     - passed (验证通过):
@@ -37,6 +36,9 @@ def route_after_verifier(state: AgentState) -> Literal["executor", "reviewer", "
     - failed (验证失败):
         - retry_count < max_retries → "executor"（重试当前步骤）
         - retry_count >= max_retries → "__end__"（重试超限，结束流程）
+
+    注意：verifier 节点已经负责递增 current_step_index（通过时）
+    和 retry_count（失败时），此处只做路由判断。
 
     Args:
         state: 当前 Agent 状态，包含 verification_passed、retry_count、
@@ -55,34 +57,30 @@ def route_after_verifier(state: AgentState) -> Literal["executor", "reviewer", "
         f"[路由] verifier -> "
         f"验证通过={verification_passed}, "
         f"重试={retry_count}/{max_retries}, "
-        f"步骤={current_step_index + 1}/{total_steps}"
+        f"步骤索引={current_step_index}/{total_steps}"
     )
 
     if verification_passed:
-        # 验证通过：检查是否还有下一步
-        next_step_index: int = current_step_index + 1
-        if next_step_index < total_steps:
-            # 还有步骤未执行，继续执行下一步
-            logger.info(f"[路由] 下一步 -> executor (步骤 {next_step_index + 1}/{total_steps})")
+        # 验证通过：verifier 已将 current_step_index 递增
+        # 检查是否还有下一步
+        if current_step_index < total_steps:
+            logger.info(f"[路由] 下一步 -> executor (步骤 {current_step_index + 1}/{total_steps})")
             return "executor"
         else:
-            # 所有步骤执行完毕，进入审查
             logger.info("[路由] 下一步 -> reviewer (所有步骤执行完毕)")
             return "reviewer"
     else:
         # 验证失败：检查是否可重试
         if retry_count < max_retries:
-            logger.info(f"[路由] 下一步 -> executor (重试第 {retry_count + 1}/{max_retries} 次)")
+            logger.info(f"[路由] 下一步 -> executor (重试第 {retry_count}/{max_retries} 次)")
             return "executor"
         else:
-            # 重试超限，结束流程
             logger.warning(f"[路由] 结束 -> END (重试超限 {max_retries} 次)")
             return END
 
 
 def route_after_reviewer(state: AgentState) -> Literal["planner", "__end__"]:
-    """
-    审查节点后的路由决策函数。
+    """审查节点后的路由决策函数。
 
     根据审查结果决定下一步走向：
     - approved (审查通过) → "__end__"（结束流程）
@@ -111,18 +109,17 @@ def route_after_reviewer(state: AgentState) -> Literal["planner", "__end__"]:
 
 
 def build_workflow() -> StateGraph:
-    """
-    构建完整的 LangGraph StateGraph 工作流。
+    """构建完整的 LangGraph StateGraph 工作流。
 
     注册 5 个节点并设置条件路由逻辑：
-    1. explore  - 探索节点：分析测试目标，理解用户意图
-    2. planner  - 规划节点：生成详细的测试步骤计划
-    3. executor - 执行节点：执行当前测试步骤
-    4. verifier - 验证节点：验证执行结果
-    5. reviewer - 审查节点：审查整个测试流程
+    1. explorer  - 探索节点：调用 ExplorerAgent 分析测试目标，理解用户意图
+    2. planner   - 规划节点：调用 PlannerAgent 生成详细的测试步骤计划
+    3. executor  - 执行节点：调用 ExecutorAgent 执行当前测试步骤
+    4. verifier  - 验证节点：调用 VerifierAgent 验证执行结果
+    5. reviewer  - 审查节点：调用 ReviewerAgent 审查整个测试流程
 
     流程拓扑：
-        explore -> planner -> executor -> verifier -> (条件路由)
+        explorer -> planner -> executor -> verifier -> (条件路由)
             ↑                          ↓            ↓
             |                     (失败重试)    (通过/完成)
             |                          ↓            ↓
@@ -137,7 +134,7 @@ def build_workflow() -> StateGraph:
         - reviewer -> rejected:            planner
 
     Returns:
-        StateGraph: 编译后的可执行 LangGraph 应用实例。
+        CompiledStateGraph: 编译后的可执行 LangGraph 应用实例。
     """
     logger.info("[Workflow] 开始构建 StateGraph")
 
@@ -157,7 +154,7 @@ def build_workflow() -> StateGraph:
     workflow.set_entry_point("explorer")
 
     # ── 添加边 ─────────────────────────────────────────────────────
-    # explore -> planner: 探索完成后进入规划
+    # explorer -> planner: 探索完成后进入规划
     workflow.add_edge("explorer", "planner")
 
     # planner -> executor: 规划完成后进入执行
@@ -203,8 +200,7 @@ def build_workflow() -> StateGraph:
 
 
 def get_compiled_graph():
-    """
-    获取编译后的可执行工作流图。
+    """获取编译后的可执行工作流图。
 
     便捷函数，直接返回 build_workflow() 的编译结果，
     供外部入口点直接调用。

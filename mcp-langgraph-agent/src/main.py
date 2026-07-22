@@ -70,6 +70,10 @@ class TestReportResponse(BaseModel):
     """测试耗时（秒）"""
     error: str | None = None
     """错误信息（如有）"""
+    quality_metrics: dict[str, Any] | None = None
+    """质量指标"""
+    token_usage: dict[str, Any] | None = None
+    """Token 使用统计"""
 
 
 class DeviceInfo(BaseModel):
@@ -88,14 +92,120 @@ class DeviceInfo(BaseModel):
 
 
 # ------------------------------------------------------------
-# 全局状态占位
-# 生产环境应替换为真实的设备池、MCP Client 和 Workflow 实例
+# 全局状态
 # ------------------------------------------------------------
 
 # 内存任务存储（仅用于演示，生产环境应使用 Redis 或 PostgreSQL）
 task_store: dict[str, dict[str, Any]] = {}
 # 设备列表（从配置文件加载）
 device_pool: list[dict[str, Any]] = []
+# LangGraph 编译后的工作流实例
+langgraph_app: Any = None
+
+
+# ------------------------------------------------------------
+# 工作流运行器
+# ------------------------------------------------------------
+
+
+async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
+    """后台运行 LangGraph 工作流任务。
+
+    构建初始状态，调用 LangGraph 工作流执行测试，
+    完成后更新任务状态和报告。
+
+    Args:
+        task_id: 任务唯一标识
+        request: 测试运行请求参数
+    """
+    import time
+
+    from src.graph.workflow import get_compiled_graph
+
+    task = task_store.get(task_id)
+    if not task:
+        return
+
+    # 更新任务状态为运行中
+    task['status'] = 'running'
+    task['updated_at'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    start_time = time.time()
+
+    try:
+        # 获取编译后的工作流
+        app = get_compiled_graph()
+
+        # 构建初始状态
+        initial_state: dict[str, Any] = {
+            'test_goal': request.app_description,
+            'test_steps': [],
+            'current_step_index': 0,
+            'executed_steps': [],
+            'ui_tree': None,
+            'screenshot_b64': None,
+            'device_name': request.device_id or 'default',
+            'test_plan': None,
+            'verification_passed': False,
+            'verification_details': [],
+            'retry_count': 0,
+            'max_retries': 3,
+            'error': None,
+            'messages': [],
+            'node_outputs': {},
+            'reviewer_feedback': None,
+            'total_tokens_used': 0,
+            'metadata': {
+                'task_id': task_id,
+                'start_time': start_time,
+                'device_id': request.device_id,
+                'timeout': request.timeout,
+            },
+        }
+
+        # 执行工作流，使用 task_id 作为线程 ID 以支持检查点
+        config = {'configurable': {'thread_id': task_id}}
+        final_state = None
+
+        # 流式执行工作流，获取最终状态
+        async for event in app.astream(initial_state, config):
+            # 记录每个节点的事件
+            for node_name, node_output in event.items():
+                logger.info(f"[Task {task_id}] 节点 {node_name} 执行完成")
+            final_state = node_output if event else None
+
+        # 如果没有获取到最终状态，尝试从检查点获取
+        if final_state is None:
+            checkpoint = await app.aget_state(config)
+            if checkpoint and checkpoint.values:
+                final_state = checkpoint.values
+
+        # 计算耗时
+        duration = time.time() - start_time
+
+        # 提取审查结果
+        reviewer_output = (
+            final_state.get('node_outputs', {}).get('reviewer', {})
+            if isinstance(final_state, dict) else {}
+        )
+
+        # 更新任务状态为完成
+        task['status'] = 'completed'
+        task['updated_at'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        task['duration'] = duration
+        task['summary'] = reviewer_output.get('feedback', '测试完成')
+        task['steps'] = final_state.get('executed_steps', []) if isinstance(final_state, dict) else []
+        task['quality_metrics'] = reviewer_output.get('quality_metrics', {})
+        task['token_usage'] = {'total_tokens_used': final_state.get('total_tokens_used', 0)} if isinstance(final_state, dict) else {}
+        task['final_verdict'] = reviewer_output.get('final_verdict', 'need_manual_check')
+
+        logger.info(f"[Task {task_id}] 测试完成，耗时 {duration:.2f}s")
+
+    except Exception as e:
+        logger.error(f"[Task {task_id}] 测试执行失败: {e}")
+        task['status'] = 'failed'
+        task['updated_at'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        task['duration'] = time.time() - start_time
+        task['error'] = str(e)
 
 
 # ------------------------------------------------------------
@@ -144,21 +254,40 @@ async def init_mcp_server() -> None:
         f"MCP Server 初始化中: host={settings.MCP_SERVER_HOST}, "
         f"port={settings.MCP_SERVER_PORT}, transport={settings.MCP_TRANSPORT}"
     )
-    # 创建 MCP Server 实例（暂不启动，等待客户端连接或独立进程运行）
     app.state.mcp_server = create_server()
-    logger.info("MCP Server 实例已创建，注册工具数: %d", len(app.state.mcp_server._tool_manager._tools))
+    logger.info("MCP Server 实例已创建")
 
 
 async def init_langgraph_workflow() -> None:
     """初始化 LangGraph Workflow
 
-    构建并编译基于 LangGraph 的自动化测试工作流图。
-    当前为占位实现，后续接入真实的 LangGraph 图构建逻辑。
+    构建并编译基于 LangGraph 的自动化测试工作流图，
+    同时初始化各节点的 Agent 实例。
     """
+    from src.graph.workflow import get_compiled_graph
+    from src.graph.nodes.executor import get_executor_agent
+
     logger.info("LangGraph Workflow 初始化中...")
-    # TODO: 接入真实的 LangGraph 图构建与编译逻辑
-    await asyncio.sleep(0.1)
-    logger.info("LangGraph Workflow 初始化完成（模拟）")
+
+    # 编译工作流图
+    compiled_graph = get_compiled_graph()
+    global langgraph_app
+    langgraph_app = compiled_graph
+
+    # 初始化 MCP Client 并注入到 Executor Agent
+    try:
+        from src.mobile_mcp.client import MCPClient
+        mcp_client = MCPClient(
+            server_command="python",
+            server_args=["-m", "src.mobile_mcp.server"],
+        )
+        # 注入 MCP Client 到 Executor Agent（延迟连接，实际执行时再连接）
+        get_executor_agent(mcp_client=mcp_client)
+        logger.info("MCP Client 已注入到 Executor Agent")
+    except Exception as e:
+        logger.warning(f"MCP Client 初始化失败（将使用模拟模式）: {e}")
+
+    logger.info("LangGraph Workflow 初始化完成")
 
 
 # ------------------------------------------------------------
@@ -220,9 +349,10 @@ async def health_check() -> dict[str, Any]:
 async def run_test(request: TestRunRequest) -> dict[str, Any]:
     """运行测试端点
 
-    接收测试运行请求，创建任务并返回任务 ID。
-    测试任务将在后台异步执行。
+    接收测试运行请求，创建任务并在后台异步执行 LangGraph 工作流。
     """
+    import time
+
     task_id = str(uuid.uuid4())
     task_store[task_id] = {
         "task_id": task_id,
@@ -230,18 +360,18 @@ async def run_test(request: TestRunRequest) -> dict[str, Any]:
         "app_description": request.app_description,
         "device_id": request.device_id,
         "timeout": request.timeout,
-        "created_at": str(asyncio.get_event_loop().time()),
-        "updated_at": str(asyncio.get_event_loop().time()),
+        "created_at": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        "updated_at": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     }
     logger.info(f"测试任务已创建: task_id={task_id}, app={request.app_description}")
 
-    # TODO: 将任务提交到后台工作队列执行
-    # 当前仅做占位响应，后续接入 LangGraph workflow 执行器
+    # 启动后台工作流任务
+    asyncio.create_task(run_workflow_task(task_id, request))
 
     return {
         "task_id": task_id,
         "status": "pending",
-        "message": "测试任务已创建，正在排队等待执行",
+        "message": "测试任务已创建，正在后台执行",
     }
 
 
@@ -272,15 +402,17 @@ async def get_test_report(task_id: str) -> TestReportResponse:
     task = task_store.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
-    # TODO: 从持久化存储中加载真实报告数据
+
     return TestReportResponse(
         task_id=task["task_id"],
         status=task["status"],
-        summary="测试尚未完成，暂无报告数据",
-        steps=[],
+        summary=task.get("summary"),
+        steps=task.get("steps", []),
         screenshots=[],
-        duration=None,
-        error=None,
+        duration=task.get("duration"),
+        error=task.get("error"),
+        quality_metrics=task.get("quality_metrics"),
+        token_usage=task.get("token_usage"),
     )
 
 
