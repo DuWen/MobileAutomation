@@ -189,6 +189,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: 创建 .env 配置文件
+        run: cp .env.example .env
+
       - name: 构建 MCP Server 镜像
         run: docker build -f Dockerfile.mcp -t mcp-server:test .
 
