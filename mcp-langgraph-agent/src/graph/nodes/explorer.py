@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 # 全局 Agent 实例缓存（延迟初始化）
 _explorer_agent: ExplorerAgent | None = None
 _skill_manager: SkillManager | None = None
+_mcp_client: Any = None  # MCP 客户端实例，由 init_langgraph_workflow 注入
 
 
 def get_explorer_agent(
@@ -47,6 +48,16 @@ def get_explorer_agent(
             token_tracker=token_tracker,
         )
     return _explorer_agent
+
+
+def set_mcp_client(mcp_client: Any) -> None:
+    """设置 MCP 客户端实例，供 HybridPerception 使用。
+
+    Args:
+        mcp_client: MCP 客户端实例
+    """
+    global _mcp_client
+    _mcp_client = mcp_client
 
 
 def get_skill_manager(skills_dir: str | None = None) -> SkillManager:
@@ -95,7 +106,8 @@ async def explorer_node(state: AgentState) -> Dict[str, Any]:
     logger.info(f"[Explorer] 开始探索测试目标: {test_goal}")
 
     # ── 1. 匹配 Skills 知识 ────────────────────────────────────
-    skill_manager = get_skill_manager()
+    from src.config.settings import settings
+    skill_manager = get_skill_manager(skills_dir=settings.SKILLS_DIR)
     matched_skills = skill_manager.match_skills(test_goal, top_k=3)
     skill_context = skill_manager.format_skills_for_prompt(matched_skills)
 
@@ -124,7 +136,7 @@ async def explorer_node(state: AgentState) -> Dict[str, Any]:
     # 如果两者都缺失且设备名可用，尝试通过 HybridPerception 获取
     if not ui_tree and not screenshot_b64 and device_name:
         try:
-            perception = HybridPerception()
+            perception = HybridPerception(mcp_client=_mcp_client)
             result = await perception.perceive(device_name, mode=perception_mode)
             ui_tree = result.ui_tree
             screenshot_b64 = result.screenshot_b64

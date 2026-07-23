@@ -13,12 +13,31 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from pydantic import BaseModel
 
 from src.config.settings import settings
+
+# ── 配置文件日志输出 ──────────────────────────────────────────
+_LOG_DIR = Path("logs")
+_LOG_DIR.mkdir(exist_ok=True)
+# 移除 loguru 默认 handler，重新配置同时输出到终端和文件
+logger.remove()
+logger.add(
+    sink=lambda msg: print(msg, end=""),
+    format=settings.LOG_FORMAT,
+    level=settings.LOG_LEVEL,
+)
+logger.add(
+    sink=str(_LOG_DIR / "agent_{time:YYYY-MM-DD}.log"),
+    format=settings.LOG_FORMAT,
+    level=settings.LOG_LEVEL,
+    rotation="00:00",       # 每天轮转
+    retention="7 days",     # 保留 7 天
+    encoding="utf-8",
+)
 
 
 # ------------------------------------------------------------
@@ -249,6 +268,8 @@ async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
                     'status': node_status,
                     'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
                     'output_summary': {},
+                    'mcp_calls': [],
+                    'skills_matched': [],
                 }
                 # 安全提取输出摘要（避免大对象导致日志过大）
                 if isinstance(node_output, dict):
@@ -261,6 +282,27 @@ async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
                                 str(val)[:500] if isinstance(val, str) and len(val) > 500 else val
                             )
                     # 从 node_outputs 子字典中提取节点特有信息
+
+                    # ── 提取 MCP 工具调用记录 ──────────────────────────
+                    # executor 节点的 mcp_calls 在 node_outputs.executor 中
+                    executor_output = node_output.get('node_outputs', {}).get('executor', {})
+                    mcp_calls = executor_output.get('mcp_calls', [])
+                    if mcp_calls:
+                        log_entry['mcp_calls'] = [
+                            {
+                                'tool': c.get('tool', ''),
+                                'params': c.get('params', {}),
+                                'success': c.get('success', True),
+                                'error': c.get('error'),
+                            }
+                            for c in mcp_calls
+                        ]
+
+                    # ── 提取 Skills 匹配记录 ──────────────────────────
+                    # explorer 节点的 matched_skills 在顶层
+                    matched_skills = node_output.get('matched_skills', [])
+                    if matched_skills:
+                        log_entry['skills_matched'] = matched_skills
                 node_logs.append(log_entry)
                 # 实时写入 task_store，使前端可以实时查看
                 task['node_logs'] = node_logs.copy()
@@ -513,16 +555,22 @@ async def init_langgraph_workflow() -> None:
     global langgraph_app
     langgraph_app = compiled_graph
 
-    # 初始化 MCP Client 并注入到 Executor Agent
+    # 初始化 MCP Client 并注入到 Executor Agent 和 Explorer 节点
     try:
+        import sys
         from src.mobile_mcp.client import MCPClient
+        # 使用当前 Python 解释器路径，避免 "python" 命令不存在的问题
+        python_executable = sys.executable
         mcp_client = MCPClient(
-            server_command="python",
+            server_command=python_executable,
             server_args=["-m", "src.mobile_mcp.server"],
         )
         # 注入 MCP Client 到 Executor Agent（延迟连接，实际执行时再连接）
         get_executor_agent(mcp_client=mcp_client)
-        logger.info("MCP Client 已注入到 Executor Agent")
+        # 注入 MCP Client 到 Explorer 节点（供 HybridPerception 使用）
+        from src.graph.nodes.explorer import set_mcp_client
+        set_mcp_client(mcp_client)
+        logger.info("MCP Client 已注入到 Executor Agent 和 Explorer 节点")
     except Exception as e:
         logger.warning(f"MCP Client 初始化失败（将使用模拟模式）: {e}")
 
@@ -774,6 +822,111 @@ async def get_task_logs(task_id: str) -> dict[str, Any]:
         "duration": task.get("duration"),
         "node_logs": task.get("node_logs", []),
         "token_usage": task.get("token_usage"),
+    }
+
+
+@app.get("/api/v1/logs/service")
+async def get_service_logs(
+    lines: int = Query(default=200, ge=1, le=2000, description="读取的日志行数"),
+    level: str = Query(default="ALL", description="过滤日志级别：ALL/DEBUG/INFO/WARNING/ERROR"),
+) -> dict[str, Any]:
+    """获取服务日志端点
+
+    读取日志文件最近的指定行数，支持按日志级别过滤。
+    日志文件路径：logs/agent_YYYY-MM-DD.log
+    """
+    import datetime
+
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    log_file = _LOG_DIR / f"agent_{today}.log"
+
+    if not log_file.exists():
+        return {
+            "log_file": str(log_file),
+            "exists": False,
+            "lines": [],
+            "total": 0,
+        }
+
+    try:
+        with open(log_file, "r", encoding="utf-8") as f:
+            all_lines = f.readlines()
+
+        # 取最后 N 行
+        recent_lines = all_lines[-lines:]
+
+        # 按级别过滤
+        if level != "ALL":
+            level_upper = level.upper()
+            recent_lines = [
+                line for line in recent_lines
+                if f"| {level_upper:<8} |" in line
+            ]
+
+        return {
+            "log_file": str(log_file),
+            "exists": True,
+            "lines": [line.rstrip("\n") for line in recent_lines],
+            "total": len(recent_lines),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取日志文件失败: {e}")
+
+
+@app.get("/api/v1/tests/{task_id}/mcp-calls")
+async def get_task_mcp_calls(task_id: str) -> dict[str, Any]:
+    """获取任务的 MCP 工具调用记录端点
+
+    从 node_logs 中提取所有 MCP 工具调用记录，便于排查 MCP 调用情况。
+    """
+    task = task_store.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
+
+    node_logs = task.get("node_logs", [])
+    mcp_calls: list[dict[str, Any]] = []
+    for log_entry in node_logs:
+        node_mcp_calls = log_entry.get("mcp_calls", [])
+        if node_mcp_calls:
+            mcp_calls.append({
+                "node": log_entry.get("node", ""),
+                "timestamp": log_entry.get("timestamp", ""),
+                "calls": node_mcp_calls,
+            })
+
+    return {
+        "task_id": task_id,
+        "total_mcp_call_nodes": len(mcp_calls),
+        "total_mcp_calls": sum(len(n["calls"]) for n in mcp_calls),
+        "mcp_calls": mcp_calls,
+    }
+
+
+@app.get("/api/v1/tests/{task_id}/skills")
+async def get_task_skills(task_id: str) -> dict[str, Any]:
+    """获取任务的 Skills 匹配记录端点
+
+    从 node_logs 中提取所有 Skills 匹配记录，便于查看知识匹配情况。
+    """
+    task = task_store.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
+
+    node_logs = task.get("node_logs", [])
+    skills_info: list[dict[str, Any]] = []
+    for log_entry in node_logs:
+        matched = log_entry.get("skills_matched", [])
+        if matched:
+            skills_info.append({
+                "node": log_entry.get("node", ""),
+                "timestamp": log_entry.get("timestamp", ""),
+                "matched_skills": matched,
+            })
+
+    return {
+        "task_id": task_id,
+        "total_skills_nodes": len(skills_info),
+        "skills_matched": skills_info,
     }
 
 

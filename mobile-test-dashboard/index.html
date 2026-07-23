@@ -1729,9 +1729,40 @@
         const isSuccess = nodeStatus === 'success';
         const nodeIcon = isSuccess ? '✓' : isFailed ? '✗' : '●';
         const iconColor = isSuccess ? 'var(--success)' : isFailed ? 'var(--error)' : 'var(--text-muted)';
+
+        // 构建 MCP 工具调用详情
+        let mcpHtml = '';
+        if (log.mcp_calls && log.mcp_calls.length > 0) {
+          mcpHtml = `<div style="margin-top:6px">
+            <div style="font-size:11px;color:var(--accent);font-weight:600;margin-bottom:4px">MCP 工具调用 (${log.mcp_calls.length})</div>
+            ${log.mcp_calls.map(c => `
+              <div style="display:inline-flex;align-items:center;gap:4px;background:${c.success ? 'var(--success-dim)' : 'var(--error-dim)'};padding:3px 8px;border-radius:4px;margin:2px 4px 2px 0;font-family:var(--font-mono);font-size:11px">
+                <span style="color:${c.success ? 'var(--success)' : 'var(--error)'}">${c.success ? '✓' : '✗'}</span>
+                <span style="color:var(--text-primary)">${c.tool || 'unknown'}</span>
+                ${c.error ? `<span style="color:var(--error);font-size:10px">${c.error.substring(0,80)}</span>` : ''}
+              </div>
+            `).join('')}
+          </div>`;
+        }
+
+        // 构建 Skills 匹配详情
+        let skillsHtml = '';
+        if (log.skills_matched && log.skills_matched.length > 0) {
+          skillsHtml = `<div style="margin-top:6px">
+            <div style="font-size:11px;color:#8b5cf6;font-weight:600;margin-bottom:4px">Skills 匹配 (${log.skills_matched.length})</div>
+            ${log.skills_matched.map(s => `
+              <div style="display:inline-flex;align-items:center;gap:4px;background:rgba(139,92,246,0.15);padding:3px 8px;border-radius:4px;margin:2px 4px 2px 0;font-size:11px">
+                <span style="color:#8b5cf6">◆</span>
+                <span style="color:var(--text-primary)">${s.name || 'unknown'}</span>
+                ${s.tags && s.tags.length > 0 ? `<span style="color:var(--text-muted);font-size:10px">[${s.tags.join(', ')}]</span>` : ''}
+              </div>
+            `).join('')}
+          </div>`;
+        }
+
         return `
           <div style="padding:10px 14px;border-bottom:1px solid var(--border);${i === logs.node_logs.length - 1 ? 'border-bottom:none' : ''}">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:${log.output_summary && Object.keys(log.output_summary).length > 0 || log.error ? '6px' : '0'}">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:${log.output_summary && Object.keys(log.output_summary).length > 0 || log.error || mcpHtml || skillsHtml ? '6px' : '0'}">
               <span style="color:${iconColor};font-weight:700;font-size:14px">${nodeIcon}</span>
               <span style="font-family:var(--font-mono);font-weight:600;font-size:13px">${log.node}</span>
               <span style="font-size:11px;color:var(--text-muted)">${log.timestamp || ''}</span>
@@ -1742,6 +1773,8 @@
                 ${Object.entries(log.output_summary).map(([k,v]) => `<span style="color:var(--accent)">${k}:</span> ${typeof v === 'string' ? v.substring(0,200) : JSON.stringify(v).substring(0,200)}`).join('\n')}
               </div>
             ` : ''}
+            ${mcpHtml}
+            ${skillsHtml}
           </div>`;
       }).join('');
     }
