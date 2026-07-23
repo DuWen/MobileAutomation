@@ -9,6 +9,7 @@ import asyncio
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import uvicorn
@@ -199,6 +200,79 @@ async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
         task['final_verdict'] = reviewer_output.get('final_verdict', 'need_manual_check')
 
         logger.info(f"[Task {task_id}] 测试完成，耗时 {duration:.2f}s")
+
+        # ── 生成测试报告 ──────────────────────────────────────────
+        try:
+            from src.utils.report_generator import ReportGenerator
+            report_gen = ReportGenerator(output_dir="reports")
+            executed_steps = task.get('steps', [])
+            verification_details = (
+                final_state.get('verification_details', [])
+                if isinstance(final_state, dict) else []
+            )
+            token_tracker_summary = (
+                final_state.get('total_tokens_used', 0)
+                if isinstance(final_state, dict) else 0
+            )
+            report_path = report_gen.generate(
+                task_id=task_id,
+                test_goal=request.app_description,
+                executed_steps=executed_steps,
+                verification_details=verification_details,
+                reviewer_output=reviewer_output,
+                token_summary={'total_tokens': token_tracker_summary, 'total_cost': 0.0, 'total_records': 0},
+                duration=duration,
+                device_name=request.device_id or 'default',
+                format="html",
+            )
+            task['report_path'] = report_path
+            logger.info(f"[Task {task_id}] 测试报告已生成: {report_path}")
+        except Exception as e:
+            logger.warning(f"[Task {task_id}] 报告生成失败: {e}")
+
+        # ── 记录性能基准 ──────────────────────────────────────────
+        try:
+            from src.utils.benchmark import BenchmarkRunner
+            bench_runner = BenchmarkRunner(data_dir="data/benchmarks")
+            step_count = len(executed_steps) if executed_steps else 0
+            passed_steps = sum(1 for s in executed_steps if s.get('passed', False)) if executed_steps else 0
+            bench_result = bench_runner.record_benchmark(
+                task_id=task_id,
+                test_goal=request.app_description,
+                duration=duration,
+                step_count=step_count,
+                passed_steps=passed_steps,
+                total_tokens=token_tracker_summary,
+                total_cost=0.0,
+                verdict=task.get('final_verdict', 'unknown'),
+            )
+            task['benchmark'] = {
+                'tokens_per_step': bench_result.tokens_per_step,
+                'duration_per_step': bench_result.duration_per_step,
+                'pass_rate': bench_result.pass_rate,
+            }
+        except Exception as e:
+            logger.warning(f"[Task {task_id}] 基准记录失败: {e}")
+
+        # ── 发送通知 ──────────────────────────────────────────────
+        try:
+            from src.utils.notifier import Notifier
+            notifier = Notifier(
+                feishu_webhook_url=settings.FEISHU_WEBHOOK_URL,
+                slack_webhook_url=settings.SLACK_WEBHOOK_URL,
+            )
+            if notifier.enabled:
+                pass_rate_str = f"{(passed_steps / step_count * 100):.0f}%" if step_count > 0 else "N/A"
+                notifier.notify_test_completed(
+                    task_id=task_id,
+                    test_goal=request.app_description,
+                    verdict=task.get('final_verdict', 'unknown'),
+                    duration=duration,
+                    pass_rate=pass_rate_str,
+                    total_tokens=token_tracker_summary,
+                )
+        except Exception as e:
+            logger.warning(f"[Task {task_id}] 通知发送失败: {e}")
 
     except Exception as e:
         logger.error(f"[Task {task_id}] 测试执行失败: {e}")
@@ -413,6 +487,34 @@ async def get_test_report(task_id: str) -> TestReportResponse:
         error=task.get("error"),
         quality_metrics=task.get("quality_metrics"),
         token_usage=task.get("token_usage"),
+    )
+
+
+@app.get("/api/v1/tests/{task_id}/report/file")
+async def get_test_report_file(task_id: str):
+    """下载测试报告文件端点
+
+    根据任务 ID 返回生成的 HTML 或 Markdown 报告文件。
+    """
+    from fastapi.responses import FileResponse
+
+    task = task_store.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
+
+    report_path = task.get("report_path")
+    if not report_path:
+        raise HTTPException(status_code=404, detail=f"任务 {task_id} 的报告文件尚未生成")
+
+    path = Path(report_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"报告文件不存在: {report_path}")
+
+    media_type = "text/html" if path.suffix == ".html" else "text/markdown"
+    return FileResponse(
+        path=str(path),
+        media_type=media_type,
+        filename=path.name,
     )
 
 

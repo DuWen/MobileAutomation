@@ -1147,3 +1147,264 @@ class TestTokenCostAlert:
         tracker.add_record(model='gpt-4o', model_tier='precise', prompt_tokens=50000, completion_tokens=10000, operation='op2')
         # 新阈值未触发
         assert len(alert_count) == 1
+
+
+# ============================================================
+# 测试报告生成器测试
+# ============================================================
+
+
+class TestReportGenerator:
+    """测试报告生成器测试"""
+
+    def _sample_data(self):
+        """创建测试报告样本数据。"""
+        return {
+            "task_id": "abc-123-def",
+            "test_goal": "测试登录功能",
+            "executed_steps": [
+                {"action": "点击登录按钮", "result": "成功", "passed": True},
+                {"action": "输入用户名", "result": "成功", "passed": True},
+                {"action": "输入密码", "result": "失败", "passed": False},
+            ],
+            "verification_details": [
+                {"check": "登录按钮可见", "passed": True},
+                {"check": "密码错误提示", "passed": False},
+            ],
+            "reviewer_output": {
+                "feedback": "部分步骤失败",
+                "final_verdict": "fail",
+                "quality_metrics": {},
+            },
+            "token_summary": {
+                "total_tokens": 12000,
+                "total_cost": 0.15,
+                "total_records": 8,
+            },
+            "duration": 45.2,
+            "device_name": "emulator-5554",
+        }
+
+    def test_generate_html_report(self, tmp_path):
+        """测试生成 HTML 格式报告"""
+        from src.utils.report_generator import ReportGenerator
+
+        generator = ReportGenerator(output_dir=str(tmp_path / "reports"))
+        data = self._sample_data()
+        path = generator.generate(**data, format="html")
+
+        assert path.endswith(".html")
+        content = open(path, encoding="utf-8").read()
+        assert "AI 自动化测试报告" in content
+        assert "测试登录功能" in content
+        assert "emulator-5554" in content
+
+    def test_generate_markdown_report(self, tmp_path):
+        """测试生成 Markdown 格式报告"""
+        from src.utils.report_generator import ReportGenerator
+
+        generator = ReportGenerator(output_dir=str(tmp_path / "reports"))
+        data = self._sample_data()
+        path = generator.generate(**data, format="markdown")
+
+        assert path.endswith(".md")
+        content = open(path, encoding="utf-8").read()
+        assert "AI 自动化测试报告" in content
+        assert "abc-123-def" in content
+
+    def test_generate_report_with_error(self, tmp_path):
+        """测试包含错误信息的报告"""
+        from src.utils.report_generator import ReportGenerator
+
+        generator = ReportGenerator(output_dir=str(tmp_path / "reports"))
+        data = self._sample_data()
+        data["error"] = "Appium Session 超时"
+        path = generator.generate(**data, format="html")
+
+        content = open(path, encoding="utf-8").read()
+        assert "错误信息" in content or "Appium" in content
+
+    def test_generate_invalid_format_raises_error(self, tmp_path):
+        """测试不支持的格式抛出 ValueError"""
+        from src.utils.report_generator import ReportGenerator
+
+        generator = ReportGenerator(output_dir=str(tmp_path / "reports"))
+        data = self._sample_data()
+        with pytest.raises(ValueError):
+            generator.generate(**data, format="pdf")
+
+    def test_generate_report_empty_steps(self, tmp_path):
+        """测试空步骤时的报告"""
+        from src.utils.report_generator import ReportGenerator
+
+        generator = ReportGenerator(output_dir=str(tmp_path / "reports"))
+        data = self._sample_data()
+        data["executed_steps"] = []
+        data["verification_details"] = []
+        path = generator.generate(**data, format="html")
+
+        content = open(path, encoding="utf-8").read()
+        assert "AI 自动化测试报告" in content
+
+
+# ============================================================
+# 告警通知器测试
+# ============================================================
+
+
+class TestNotifier:
+    """告警通知器测试"""
+
+    def test_notifier_disabled_when_no_urls(self):
+        """测试无 Webhook URL 时通知器禁用"""
+        from src.utils.notifier import Notifier
+
+        notifier = Notifier()
+        assert notifier.enabled is False
+
+    def test_notifier_enabled_with_feishu_url(self):
+        """测试配置飞书 URL 后通知器启用"""
+        from src.utils.notifier import Notifier
+
+        notifier = Notifier(feishu_webhook_url="https://open.feishu.cn/hook/test")
+        assert notifier.enabled is True
+
+    def test_notifier_enabled_with_slack_url(self):
+        """测试配置 Slack URL 后通知器启用"""
+        from src.utils.notifier import Notifier
+
+        notifier = Notifier(slack_webhook_url="https://hooks.slack.com/services/test")
+        assert notifier.enabled is True
+
+    def test_notify_test_completed_returns_empty_when_disabled(self):
+        """测试通知器禁用时返回空结果"""
+        from src.utils.notifier import Notifier
+
+        notifier = Notifier()
+        result = notifier.notify_test_completed(
+            task_id="test", test_goal="测试", verdict="pass", duration=10.0
+        )
+        assert result == {}
+
+    def test_notification_event_enum(self):
+        """测试通知事件枚举"""
+        from src.utils.notifier import NotificationEvent
+
+        assert NotificationEvent.TEST_COMPLETED.value == "test_completed"
+        assert NotificationEvent.TEST_FAILED.value == "test_failed"
+        assert NotificationEvent.COST_ALERT.value == "cost_alert"
+
+    def test_notification_channel_enum(self):
+        """测试通知渠道枚举"""
+        from src.utils.notifier import NotificationChannel
+
+        assert NotificationChannel.FEISHU.value == "feishu"
+        assert NotificationChannel.SLACK.value == "slack"
+
+
+# ============================================================
+# 性能基准测试模块测试
+# ============================================================
+
+
+class TestBenchmarkRunner:
+    """性能基准测试模块测试"""
+
+    def test_record_benchmark(self, tmp_path):
+        """测试记录基准数据"""
+        from src.utils.benchmark import BenchmarkRunner
+
+        runner = BenchmarkRunner(data_dir=str(tmp_path / "benchmarks"))
+        result = runner.record_benchmark(
+            task_id="test-1",
+            test_goal="测试登录",
+            duration=45.2,
+            step_count=5,
+            passed_steps=4,
+            total_tokens=12000,
+            total_cost=0.15,
+            verdict="pass",
+        )
+
+        assert result.task_id == "test-1"
+        assert result.pass_rate == 0.8
+        assert result.tokens_per_step == 2400.0
+        assert result.duration_per_step == 9.04
+
+    def test_get_summary(self, tmp_path):
+        """测试获取统计摘要"""
+        from src.utils.benchmark import BenchmarkRunner
+
+        runner = BenchmarkRunner(data_dir=str(tmp_path / "benchmarks"))
+        runner.record_benchmark(
+            task_id="test-1", test_goal="测试1",
+            duration=30.0, step_count=3, passed_steps=3,
+            total_tokens=9000, total_cost=0.1, verdict="pass",
+        )
+        runner.record_benchmark(
+            task_id="test-2", test_goal="测试2",
+            duration=60.0, step_count=5, passed_steps=4,
+            total_tokens=15000, total_cost=0.2, verdict="fail",
+        )
+
+        summary = runner.get_summary()
+        assert summary["total_runs"] == 2
+        assert summary["avg_duration"] == 45.0
+        assert summary["pass_count"] == 1
+        assert summary["fail_count"] == 1
+
+    def test_compare_with_baseline(self, tmp_path):
+        """测试与基准对比"""
+        from src.utils.benchmark import BenchmarkRunner, BenchmarkResult
+
+        runner = BenchmarkRunner(data_dir=str(tmp_path / "benchmarks"))
+        runner.record_benchmark(
+            task_id="test-1", test_goal="测试1",
+            duration=30.0, step_count=3, passed_steps=3,
+            total_tokens=9000, total_cost=0.1, verdict="pass",
+        )
+
+        result = BenchmarkResult(
+            task_id="test-2", test_goal="测试2",
+            duration=45.0, step_count=5, passed_steps=4,
+            pass_rate=0.8, total_tokens=12000, total_cost=0.15,
+            tokens_per_step=2400, cost_per_step=0.03,
+            duration_per_step=9.0, verdict="pass",
+        )
+
+        comparison = runner.compare_with_baseline(result)
+        assert comparison["comparison"] == "compared"
+        assert "duration_delta_pct" in comparison
+
+    def test_compare_with_baseline_no_history(self, tmp_path):
+        """测试无历史数据时的对比"""
+        from src.utils.benchmark import BenchmarkRunner, BenchmarkResult
+
+        runner = BenchmarkRunner(data_dir=str(tmp_path / "benchmarks_new"))
+        result = BenchmarkResult(
+            task_id="test-1", test_goal="测试1",
+            duration=30.0, step_count=3, passed_steps=3,
+            pass_rate=1.0, total_tokens=9000, total_cost=0.1,
+            tokens_per_step=3000, cost_per_step=0.033,
+            duration_per_step=10.0, verdict="pass",
+        )
+
+        comparison = runner.compare_with_baseline(result)
+        assert comparison["comparison"] == "no_baseline"
+
+    def test_benchmark_data_persistence(self, tmp_path):
+        """测试基准数据持久化"""
+        from src.utils.benchmark import BenchmarkRunner
+
+        data_dir = str(tmp_path / "benchmarks_persist")
+        runner1 = BenchmarkRunner(data_dir=data_dir)
+        runner1.record_benchmark(
+            task_id="test-1", test_goal="测试1",
+            duration=30.0, step_count=3, passed_steps=3,
+            total_tokens=9000, total_cost=0.1, verdict="pass",
+        )
+
+        # 新实例加载同一目录
+        runner2 = BenchmarkRunner(data_dir=data_dir)
+        summary = runner2.get_summary()
+        assert summary["total_runs"] == 1
