@@ -196,7 +196,7 @@ jobs:
         run: docker build -f Dockerfile.langgraph -t langgraph-agent:test .
 
       - name: 检查 Docker Compose 配置
-        run: docker compose config -f docker-compose.yml
+        run: docker compose -f docker-compose.yml config
 
   # ── Job 5: CI 通知 ────────────────────────────────────────────────
   notify:

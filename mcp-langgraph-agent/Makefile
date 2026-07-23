@@ -1,8 +1,6 @@
-"""
-Makefile - 常用命令集合
-
-提供安装依赖、启动开发服务器、代码检查、测试运行和 Docker 管理等常用操作的快捷命令。
-"""
+# Makefile - 常用命令集合
+#
+# 提供安装依赖、启动开发服务器、代码检查、测试运行和 Docker 管理等常用操作的快捷命令。
 
 .PHONY: help install dev lint test docker-up docker-down clean
 
@@ -26,8 +24,8 @@ install:  # 安装项目依赖（开发模式）
 # 启动开发服务器
 dev:  # 以开发模式启动 MCP Server 和 LangGraph Agent
 	@echo "启动开发服务器..."
-	python -m src.mcp_server &
-	python -m src.langgraph_agent &
+	python -m src.mobile_mcp.server &
+	python -m src.main &
 	@echo "开发服务器已启动：MCP Server (8000), LangGraph Agent (8001)"
 
 # 运行代码检查

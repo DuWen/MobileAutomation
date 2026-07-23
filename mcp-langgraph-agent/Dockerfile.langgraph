@@ -30,4 +30,4 @@ COPY pyproject.toml .
 EXPOSE 8001
 
 # 启动 LangGraph Agent Service
-CMD ["python", "-m", "src.langgraph_agent"]
+CMD ["python", "-m", "src.main"]

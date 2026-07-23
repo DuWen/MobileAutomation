@@ -30,4 +30,4 @@ COPY pyproject.toml .
 EXPOSE 8000
 
 # 启动 MCP Server
-CMD ["python", "-m", "src.mcp_server"]
+CMD ["python", "-m", "src.mobile_mcp.server"]
