@@ -215,24 +215,78 @@ jobs:
           echo "verify: ${{ needs.verify.result }}"
           echo "docker-build: ${{ needs.docker-build.result }}"
 
+      - name: 判断 CI 整体状态
+        id: ci_status
+        run: |
+          if [ "${{ needs.lint.result }}" = "success" ] && \
+             [ "${{ needs.test.result }}" = "success" ] && \
+             [ "${{ needs.verify.result }}" = "success" ] && \
+             [ "${{ needs.docker-build.result }}" = "success" ]; then
+            echo "overall=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "overall=failure" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: 发送飞书通知（成功）
-        if: needs.lint.result == 'success' && needs.test.result == 'success'
+        if: steps.ci_status.outputs.overall == 'success'
         run: |
           if [ -n "$FEISHU_WEBHOOK_URL" ]; then
+            BRANCH="${{ github.ref_name }}"
+            SHA="${{ github.sha }}"
+            ACTOR="${{ github.actor }}"
             curl -s -X POST "$FEISHU_WEBHOOK_URL" \
               -H "Content-Type: application/json" \
-              -d "{\"msg_type\":\"interactive\",\"card\":{\"header\":{\"title\":{\"tag\":\"plain_text\",\"content\":\"✅ CI 流水线通过\"},\"template\":\"green\"},\"elements\":[{\"tag\":\"markdown\",\"content\":\"**分支**: ${{ github.ref_name }}\\n**提交**: ${{ github.sha }}\\n**触发者**: ${{ github.actor }}\"}]}}"
+              -d "{
+                \"msg_type\": \"interactive\",
+                \"card\": {
+                  \"header\": {
+                    \"title\": {\"tag\": \"plain_text\", \"content\": \"✅ CI 流水线通过\"},
+                    \"template\": \"green\"
+                  },
+                  \"elements\": [{
+                    \"tag\": \"markdown\",
+                    \"content\": \"**分支**: ${BRANCH}\\n**提交**: ${SHA}\\n**触发者**: ${ACTOR}\"
+                  }]
+                }
+              }"
+            echo "飞书通知已发送（成功）"
+          else
+            echo "跳过飞书通知：FEISHU_WEBHOOK_URL 未配置"
           fi
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
 
       - name: 发送飞书通知（失败）
-        if: needs.lint.result == 'failure' || needs.test.result == 'failure'
+        if: steps.ci_status.outputs.overall == 'failure'
         run: |
           if [ -n "$FEISHU_WEBHOOK_URL" ]; then
+            BRANCH="${{ github.ref_name }}"
+            SHA="${{ github.sha }}"
+            ACTOR="${{ github.actor }}"
+            RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            FAILED_JOBS=""
+            [ "${{ needs.lint.result }}" != "success" ] && FAILED_JOBS="${FAILED_JOBS} lint(${{ needs.lint.result }})"
+            [ "${{ needs.test.result }}" != "success" ] && FAILED_JOBS="${FAILED_JOBS} test(${{ needs.test.result }})"
+            [ "${{ needs.verify.result }}" != "success" ] && FAILED_JOBS="${FAILED_JOBS} verify(${{ needs.verify.result }})"
+            [ "${{ needs.docker-build.result }}" != "success" ] && FAILED_JOBS="${FAILED_JOBS} docker-build(${{ needs.docker-build.result }})"
             curl -s -X POST "$FEISHU_WEBHOOK_URL" \
               -H "Content-Type: application/json" \
-              -d "{\"msg_type\":\"interactive\",\"card\":{\"header\":{\"title\":{\"tag\":\"plain_text\",\"content\":\"❌ CI 流水线失败\"},\"template\":\"red\"},\"elements\":[{\"tag\":\"markdown\",\"content\":\"**分支**: ${{ github.ref_name }}\\n**提交**: ${{ github.sha }}\\n**触发者**: ${{ github.actor }}\\n**详情**: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}]}}"
+              -d "{
+                \"msg_type\": \"interactive\",
+                \"card\": {
+                  \"header\": {
+                    \"title\": {\"tag\": \"plain_text\", \"content\": \"❌ CI 流水线失败\"},
+                    \"template\": \"red\"
+                  },
+                  \"elements\": [{
+                    \"tag\": \"markdown\",
+                    \"content\": \"**分支**: ${BRANCH}\\n**提交**: ${SHA}\\n**触发者**: ${ACTOR}\\n**失败 Job**: ${FAILED_JOBS}\\n**详情**: ${RUN_URL}\"
+                  }]
+                }
+              }"
+            echo "飞书通知已发送（失败）"
+          else
+            echo "跳过飞书通知：FEISHU_WEBHOOK_URL 未配置"
           fi
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
