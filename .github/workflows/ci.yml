@@ -12,10 +12,12 @@ on:
     branches: [main, 'dev_*', 'feature/*']
     paths:
       - 'mcp-langgraph-agent/**'
+      - '.github/workflows/**'
   pull_request:
     branches: [main, 'dev_*']
     paths:
       - 'mcp-langgraph-agent/**'
+      - '.github/workflows/**'
 
 # 同一分支的并发 CI 只保留最新一次
 concurrency:
@@ -208,20 +210,18 @@ jobs:
     needs: [lint, test, verify, docker-build]
     if: always()
     steps:
-      - name: 检查 CI 整体结果
-        run: |
-          echo "lint: ${{ needs.lint.result }}"
-          echo "test: ${{ needs.test.result }}"
-          echo "verify: ${{ needs.verify.result }}"
-          echo "docker-build: ${{ needs.docker-build.result }}"
-
       - name: 判断 CI 整体状态
         id: ci_status
         run: |
-          if [ "${{ needs.lint.result }}" = "success" ] && \
-             [ "${{ needs.test.result }}" = "success" ] && \
-             [ "${{ needs.verify.result }}" = "success" ] && \
-             [ "${{ needs.docker-build.result }}" = "success" ]; then
+          LINT="${{ needs.lint.result }}"
+          TEST="${{ needs.test.result }}"
+          VERIFY="${{ needs.verify.result }}"
+          DOCKER="${{ needs.docker-build.result }}"
+          echo "lint=${LINT}" >> "$GITHUB_OUTPUT"
+          echo "test=${TEST}" >> "$GITHUB_OUTPUT"
+          echo "verify=${VERIFY}" >> "$GITHUB_OUTPUT"
+          echo "docker=${DOCKER}" >> "$GITHUB_OUTPUT"
+          if [ "$LINT" = "success" ] && [ "$TEST" = "success" ] && [ "$VERIFY" = "success" ] && [ "$DOCKER" = "success" ]; then
             echo "overall=success" >> "$GITHUB_OUTPUT"
           else
             echo "overall=failure" >> "$GITHUB_OUTPUT"
