@@ -67,6 +67,11 @@ async def planner_node(state: AgentState) -> Dict[str, Any]:
     # 获取 Agent 实例
     agent: PlannerAgent = get_planner_agent()
 
+    # 注入 Skill 知识上下文（由 Explorer 节点匹配并传递）
+    skill_context: str = state.get('skill_context', '')
+    if skill_context:
+        agent.set_skill_context(skill_context)
+
     # 提取探索结果
     explorer_output: dict = state.get('node_outputs', {}).get('explorer', {})
 

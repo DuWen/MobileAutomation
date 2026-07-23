@@ -1,11 +1,11 @@
 """Agent 基类模块。
 
 提供所有 Agent 的基础抽象类，封装 LLM 调用的通用逻辑，
-包括模型路由、Token 追踪和系统提示词注入等功能。
+包括模型路由、Token 追踪、系统提示词注入和 Skill 知识注入等功能。
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from src.agents.llm import ModelRouter
 from src.agents.prompts import SYSTEM_PROMPT
@@ -16,13 +16,14 @@ class BaseAgent(ABC):
     """Agent 基类，提供 LLM 调用的基础封装。
 
     所有具体的 Agent 节点（探索、规划、执行、验证、审查）都应继承此类。
-    封装了 LLM 调用、Token 追踪、系统提示词注入等通用功能。
+    封装了 LLM 调用、Token 追踪、系统提示词注入、Skill 知识注入等通用功能。
 
     Attributes:
         name: Agent 名称
         model_router: 模型路由实例，用于三级模型路由
         token_tracker: Token 消耗追踪器
         system_prompt: 系统级提示词，定义 Agent 角色和行为规范
+        skill_context: 当前注入的 Skill 知识上下文文本
     """
 
     # 模型层级映射：各 Agent 节点使用不同层级的模型
@@ -48,6 +49,7 @@ class BaseAgent(ABC):
         self.model_router: ModelRouter = model_router or ModelRouter()
         self.token_tracker: TokenTracker = token_tracker or TokenTracker()
         self.system_prompt: str = SYSTEM_PROMPT
+        self.skill_context: Optional[str] = None
 
     def call_llm(
         self,
@@ -79,10 +81,11 @@ class BaseAgent(ABC):
         # 确定使用的模型层级
         tier = model_tier or self.DEFAULT_MODEL_TIER
 
-        # 注入系统提示词：如果消息列表的第一个不是 system 角色，则插入
+        # 注入系统提示词（包含 Skill 知识上下文）
+        system_msg = self._build_system_message()
         if not messages or messages[0].get('role') != 'system':
             messages_with_system = [
-                {'role': 'system', 'content': self.system_prompt},
+                {'role': 'system', 'content': system_msg},
                 *messages,
             ]
         else:
@@ -135,10 +138,11 @@ class BaseAgent(ABC):
         # 确定使用的模型层级
         tier = model_tier or self.DEFAULT_MODEL_TIER
 
-        # 注入系统提示词
+        # 注入系统提示词（包含 Skill 知识上下文）
+        system_msg = self._build_system_message()
         if not messages or messages[0].get('role') != 'system':
             messages_with_system = [
-                {'role': 'system', 'content': self.system_prompt},
+                {'role': 'system', 'content': system_msg},
                 *messages,
             ]
         else:
@@ -171,6 +175,29 @@ class BaseAgent(ABC):
             prompt: 新的系统提示词内容
         """
         self.system_prompt = prompt
+
+    def set_skill_context(self, skill_context: str | None) -> None:
+        """设置 Skill 知识上下文。
+
+        注入的 Skill 知识会自动拼接到系统提示词中，
+        指导 LLM 在特定测试场景下的行为。
+
+        Args:
+            skill_context: Skill 知识文本，为 None 时清除上下文
+        """
+        self.skill_context = skill_context
+
+    def _build_system_message(self) -> str:
+        """构建包含 Skill 知识的完整系统提示词。
+
+        如果设置了 skill_context，将其拼接到系统提示词末尾。
+
+        Returns:
+            完整的系统提示词文本
+        """
+        if self.skill_context:
+            return f"{self.system_prompt}\n\n## 相关技能知识（请参考以下知识指导测试行为）\n{self.skill_context}"
+        return self.system_prompt
 
     def get_token_summary(self) -> Dict[str, Any]:
         """获取当前会话的 Token 消耗统计摘要。

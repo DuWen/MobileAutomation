@@ -73,6 +73,17 @@ class AgentState(TypedDict):
     reviewer_feedback: Optional[str]
     """审查节点的反馈意见。"""
 
+    # ── Skills 知识 ───────────────────────────────────────────────
+    matched_skills: Optional[list]
+    """与测试目标匹配的 Skill 知识列表，由 Explorer 节点匹配并注入。"""
+
+    skill_context: Optional[str]
+    """格式化后的 Skill 知识文本，注入到后续节点的系统提示词中。"""
+
+    # ── 感知策略 ──────────────────────────────────────────────────
+    perception_mode: str
+    """感知模式：ui_tree / screenshot / hybrid，默认 hybrid。"""
+
     # ── 统计与元数据 ───────────────────────────────────────────────
     total_tokens_used: int
     """整个工作流已消耗的 Token 总数。"""

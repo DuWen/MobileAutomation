@@ -18,6 +18,7 @@ from .tools.assertions import AssertToolkit
 from .tools.device import DeviceManager
 from .tools.ui import UIToolkit
 from .tools.vision import VisionToolkit
+from src.utils.redact import redact_dict
 
 logger = logging.getLogger(__name__)
 
@@ -174,8 +175,8 @@ class MobileAutomationServer(FastMCP):
                     success 为 True 时 data 包含设备详细信息。
             """
             result = self._device_manager.get_device_info(device_name)
-            # 脱敏后再返回
-            return result
+            # 脱敏后再返回，防止设备序列号等敏感信息泄露
+            return redact_dict(result)
 
         @self.tool(
             name="list_devices",
@@ -228,12 +229,14 @@ class MobileAutomationServer(FastMCP):
 
         @self.tool(
             name="input_text",
-            description="向指定元素输入文本内容，先清除再输入",
+            description="向指定元素输入文本内容，先清除再输入，敏感字段自动脱敏记录",
         )
         def input_text(
             device_name: str, element_id: str, text: str
         ) -> Dict:
             """向指定元素输入文本内容。
+
+            输入操作会被记录，敏感信息（如密码）在日志和返回值中自动脱敏。
 
             Args:
                 device_name: 设备名称/标识符。
@@ -243,9 +246,11 @@ class MobileAutomationServer(FastMCP):
             Returns:
                 Dict: {"success": bool, "data": {...}} 格式的响应。
             """
-            return self._ui_toolkit.input_text(
+            result = self._ui_toolkit.input_text(
                 device_name, element_id, text
             )
+            # 对返回结果进行脱敏处理，防止敏感信息泄露
+            return redact_dict(result)
 
         @self.tool(
             name="swipe",

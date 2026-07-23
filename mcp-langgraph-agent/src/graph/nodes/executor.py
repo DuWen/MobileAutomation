@@ -96,6 +96,11 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
     # 获取 Agent 实例
     agent: ExecutorAgent = get_executor_agent()
 
+    # 注入 Skill 知识上下文（由 Explorer 节点匹配并传递）
+    skill_context: str = state.get('skill_context', '')
+    if skill_context:
+        agent.set_skill_context(skill_context)
+
     # 调用 Agent 执行步骤
     execution_record: Dict[str, Any] = await agent.run(
         current_step=current_step,

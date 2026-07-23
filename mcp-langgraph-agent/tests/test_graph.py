@@ -39,6 +39,9 @@ class TestAgentState:
             messages=[],
             node_outputs={},
             reviewer_feedback=None,
+            matched_skills=None,
+            skill_context=None,
+            perception_mode="hybrid",
             total_tokens_used=0,
             metadata={},
         )
@@ -71,6 +74,9 @@ class TestAgentState:
             messages=[{"role": "user", "content": "hi"}],
             node_outputs={},
             reviewer_feedback=None,
+            matched_skills=None,
+            skill_context=None,
+            perception_mode="hybrid",
             total_tokens_used=0,
             metadata={},
         )
@@ -806,6 +812,9 @@ class TestWorkflowIntegration:
                 'messages': [],
                 'node_outputs': {},
                 'reviewer_feedback': None,
+                'matched_skills': None,
+                'skill_context': None,
+                'perception_mode': 'hybrid',
                 'total_tokens_used': 0,
                 'metadata': {'task_id': 'test-task'},
             }
@@ -819,3 +828,322 @@ class TestWorkflowIntegration:
 
             # 验证工作流完成
             assert final_state is not None
+
+
+# ============================================================
+# Skills 管理器测试
+# ============================================================
+
+
+class TestSkillManager:
+    """Skills 知识库管理器测试"""
+
+    def test_skill_manager_loads_skills(self, tmp_path):
+        """测试 SkillManager 加载 Skills 文件"""
+        from src.skills.manager import SkillManager
+
+        # 创建临时 Skills 目录
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        (skills_dir / "login.md").write_text(
+            "# 登录测试 Skill\n\n## 适用场景\n用户登录 / 账号切换\n\n## 测试要点\n1. 定位登录按钮\n",
+            encoding="utf-8",
+        )
+        (skills_dir / "search.md").write_text(
+            "# 搜索测试 Skill\n\n## 适用场景\n搜索功能 / 筛选过滤\n\n## 测试要点\n1. 搜索框定位\n",
+            encoding="utf-8",
+        )
+
+        manager = SkillManager(skills_dir=str(skills_dir))
+        assert len(manager.list_skills()) == 2
+        assert "login" in manager.list_skills()
+        assert "search" in manager.list_skills()
+
+    def test_skill_manager_match_skills(self, tmp_path):
+        """测试 SkillManager 匹配 Skills"""
+        from src.skills.manager import SkillManager
+
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        (skills_dir / "login.md").write_text(
+            "# 登录测试 Skill\n\n## 适用场景\n用户登录 / 账号切换 / 密码重置\n\n## 测试要点\n1. 定位登录按钮\n",
+            encoding="utf-8",
+        )
+        (skills_dir / "search.md").write_text(
+            "# 搜索测试 Skill\n\n## 适用场景\n搜索功能 / 筛选过滤\n\n## 测试要点\n1. 搜索框定位\n",
+            encoding="utf-8",
+        )
+
+        manager = SkillManager(skills_dir=str(skills_dir))
+        matched = manager.match_skills("测试用户登录流程")
+        assert len(matched) >= 1
+        assert matched[0].name == "login"
+
+    def test_skill_manager_format_skills_for_prompt(self, tmp_path):
+        """测试 SkillManager 格式化 Skills 为提示词"""
+        from src.skills.manager import SkillManager
+
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        (skills_dir / "login.md").write_text(
+            "# 登录测试 Skill\n\n## 测试要点\n1. 定位登录按钮\n",
+            encoding="utf-8",
+        )
+
+        manager = SkillManager(skills_dir=str(skills_dir))
+        matched = manager.match_skills("登录")
+        prompt_text = manager.format_skills_for_prompt(matched)
+        assert "登录测试 Skill" in prompt_text
+        assert "---" in prompt_text
+
+    def test_skill_manager_get_skill(self, tmp_path):
+        """测试按名称获取 Skill"""
+        from src.skills.manager import SkillManager
+
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        (skills_dir / "login.md").write_text("# 登录\n", encoding="utf-8")
+
+        manager = SkillManager(skills_dir=str(skills_dir))
+        skill = manager.get_skill("login")
+        assert skill is not None
+        assert skill.name == "login"
+
+        # 不存在的 Skill
+        assert manager.get_skill("nonexistent") is None
+
+    def test_skill_manager_empty_dir(self, tmp_path):
+        """测试空目录时 SkillManager 正常处理"""
+        from src.skills.manager import SkillManager
+
+        skills_dir = tmp_path / "empty_skills"
+        skills_dir.mkdir()
+
+        manager = SkillManager(skills_dir=str(skills_dir))
+        assert len(manager.list_skills()) == 0
+        assert manager.match_skills("测试") == []
+
+    def test_skill_manager_nonexistent_dir(self, tmp_path):
+        """测试不存在的目录时 SkillManager 正常处理"""
+        from src.skills.manager import SkillManager
+
+        manager = SkillManager(skills_dir=str(tmp_path / "nonexistent"))
+        assert len(manager.list_skills()) == 0
+
+    def test_skill_manager_reload(self, tmp_path):
+        """测试 SkillManager 重新加载"""
+        from src.skills.manager import SkillManager
+
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        (skills_dir / "login.md").write_text("# 登录\n", encoding="utf-8")
+
+        manager = SkillManager(skills_dir=str(skills_dir))
+        assert len(manager.list_skills()) == 1
+
+        # 新增文件后重新加载
+        (skills_dir / "search.md").write_text("# 搜索\n", encoding="utf-8")
+        manager.reload()
+        assert len(manager.list_skills()) == 2
+
+
+# ============================================================
+# BaseAgent Skill 注入测试
+# ============================================================
+
+
+class TestBaseAgentSkillInjection:
+    """Agent 基类 Skill 注入测试"""
+
+    def test_set_skill_context(self):
+        """测试设置 Skill 知识上下文"""
+        from src.agents.base import BaseAgent
+
+        class TestAgent(BaseAgent):
+            def run(self, **kwargs):
+                return {}
+
+        agent = TestAgent(name='test')
+        agent.set_skill_context("登录相关技能知识")
+        assert agent.skill_context == "登录相关技能知识"
+
+    def test_build_system_message_without_skill(self):
+        """测试无 Skill 知识时构建系统消息"""
+        from src.agents.base import BaseAgent
+
+        class TestAgent(BaseAgent):
+            def run(self, **kwargs):
+                return {}
+
+        agent = TestAgent(name='test')
+        msg = agent._build_system_message()
+        assert msg == agent.system_prompt
+
+    def test_build_system_message_with_skill(self):
+        """测试有 Skill 知识时构建系统消息"""
+        from src.agents.base import BaseAgent
+
+        class TestAgent(BaseAgent):
+            def run(self, **kwargs):
+                return {}
+
+        agent = TestAgent(name='test')
+        agent.set_skill_context("登录测试要点：1. 定位登录按钮")
+        msg = agent._build_system_message()
+        assert "相关技能知识" in msg
+        assert "登录测试要点" in msg
+
+    def test_clear_skill_context(self):
+        """测试清除 Skill 知识上下文"""
+        from src.agents.base import BaseAgent
+
+        class TestAgent(BaseAgent):
+            def run(self, **kwargs):
+                return {}
+
+        agent = TestAgent(name='test')
+        agent.set_skill_context("技能知识")
+        agent.set_skill_context(None)
+        assert agent.skill_context is None
+        msg = agent._build_system_message()
+        assert msg == agent.system_prompt
+
+
+# ============================================================
+# 混合感知策略测试
+# ============================================================
+
+
+class TestHybridPerception:
+    """混合感知策略测试"""
+
+    def test_perception_mode_enum(self):
+        """测试感知模式枚举值"""
+        from src.utils.perception import PerceptionMode
+
+        assert PerceptionMode.UI_TREE.value == "ui_tree"
+        assert PerceptionMode.SCREENSHOT.value == "screenshot"
+        assert PerceptionMode.HYBRID.value == "hybrid"
+
+    def test_perception_result_dataclass(self):
+        """测试感知结果数据结构"""
+        from src.utils.perception import PerceptionResult, PerceptionMode
+
+        result = PerceptionResult(
+            ui_tree="tree_data",
+            screenshot_b64="base64_data",
+            mode=PerceptionMode.HYBRID,
+            ui_tree_available=True,
+            screenshot_available=False,
+            ui_tree_size_bytes=1024,
+            screenshot_size_bytes=0,
+        )
+        assert result.ui_tree_available is True
+        assert result.screenshot_available is False
+        assert result.mode == PerceptionMode.HYBRID
+
+    def test_estimate_token_savings(self):
+        """测试 Token 节省估算"""
+        from src.utils.perception import PerceptionResult, PerceptionMode, HybridPerception
+
+        result = PerceptionResult(
+            ui_tree="tree_data",
+            screenshot_b64="",
+            mode=PerceptionMode.UI_TREE,
+            ui_tree_available=True,
+            screenshot_available=False,
+            ui_tree_size_bytes=5000,
+            screenshot_size_bytes=50000,
+        )
+
+        perception = HybridPerception()
+        savings = perception.estimate_token_savings(result)
+        assert savings['savings_ratio'] > 0
+        assert savings['mode_used'] == 'ui_tree'
+
+    @pytest.mark.asyncio
+    async def test_perceive_without_mcp_client(self):
+        """测试无 MCP 客户端时的感知行为"""
+        from src.utils.perception import HybridPerception, PerceptionMode
+
+        perception = HybridPerception(mcp_client=None)
+        result = await perception.perceive("emulator-5554", mode=PerceptionMode.HYBRID)
+
+        assert result.ui_tree_available is False
+        assert result.screenshot_available is False
+
+
+# ============================================================
+# Token 成本监控测试
+# ============================================================
+
+
+class TestTokenCostAlert:
+    """Token 成本告警测试"""
+
+    def test_cost_alert_triggers_on_threshold(self):
+        """测试累计成本超过阈值时触发告警"""
+        from src.utils.token_tracker import TokenTracker
+
+        alert_called = []
+        def mock_callback(info):
+            alert_called.append(info)
+
+        tracker = TokenTracker(
+            cost_alert_threshold=0.001,
+            cost_alert_callback=mock_callback,
+        )
+
+        # 添加一条超过阈值的记录
+        tracker.add_record(
+            model='gpt-4o',
+            model_tier='precise',
+            prompt_tokens=50000,
+            completion_tokens=10000,
+            operation='verify',
+        )
+
+        assert len(alert_called) == 1
+        assert alert_called[0]['event'] == 'cost_alert'
+        assert alert_called[0]['total_cost'] >= 0.001
+
+    def test_cost_alert_only_triggers_once(self):
+        """测试成本告警只触发一次"""
+        from src.utils.token_tracker import TokenTracker
+
+        alert_count = []
+        def mock_callback(info):
+            alert_count.append(1)
+
+        tracker = TokenTracker(
+            cost_alert_threshold=0.001,
+            cost_alert_callback=mock_callback,
+        )
+
+        # 添加多条记录
+        tracker.add_record(model='gpt-4o', model_tier='precise', prompt_tokens=50000, completion_tokens=10000, operation='op1')
+        tracker.add_record(model='gpt-4o', model_tier='precise', prompt_tokens=50000, completion_tokens=10000, operation='op2')
+
+        assert len(alert_count) == 1
+
+    def test_set_cost_alert_resets_flag(self):
+        """测试动态设置成本告警重置标志"""
+        from src.utils.token_tracker import TokenTracker
+
+        alert_count = []
+        def mock_callback(info):
+            alert_count.append(1)
+
+        tracker = TokenTracker(
+            cost_alert_threshold=0.001,
+            cost_alert_callback=mock_callback,
+        )
+
+        tracker.add_record(model='gpt-4o', model_tier='precise', prompt_tokens=50000, completion_tokens=10000, operation='op1')
+        assert len(alert_count) == 1
+
+        # 更新阈值，重置标志
+        tracker.set_cost_alert(threshold=10.0)
+        tracker.add_record(model='gpt-4o', model_tier='precise', prompt_tokens=50000, completion_tokens=10000, operation='op2')
+        # 新阈值未触发
+        assert len(alert_count) == 1
