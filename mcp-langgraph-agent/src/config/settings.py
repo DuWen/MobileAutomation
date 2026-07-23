@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     """LLM API 密钥"""
     LLM_MODEL: str = "gpt-4o"
     """LLM 模型名称"""
+    LLM_BASE_URL: str = ""
+    """LLM API 基础地址（兼容 OpenAI 格式的第三方 API，如 LM Studio、Ollama）"""
     LLM_MAX_TOKENS: int = 4096
     """LLM 每次请求的最大 token 数"""
     LLM_TEMPERATURE: float = 0.7

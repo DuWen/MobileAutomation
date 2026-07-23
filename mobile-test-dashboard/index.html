@@ -505,10 +505,19 @@
       border-color: var(--accent);
       color: #000;
     }
+    .wf-step.failed .wf-step-dot {
+      background: var(--error);
+      border-color: var(--error);
+      color: #fff;
+    }
     .wf-step.active .wf-step-dot {
       border-color: var(--accent);
       color: var(--accent);
-      box-shadow: 0 0 12px rgba(245,158,11,0.3);
+      animation: wfPulse 1.5s ease-in-out infinite;
+    }
+    @keyframes wfPulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.4); }
+      50% { box-shadow: 0 0 0 8px rgba(245,158,11,0); }
     }
     .wf-step-label {
       font-size: 10px;
@@ -519,13 +528,31 @@
     }
     .wf-step.completed .wf-step-label,
     .wf-step.active .wf-step-label { color: var(--accent); }
+    .wf-step.failed .wf-step-label { color: var(--error); }
     .wf-connector {
       flex: 0 0 40px;
       height: 2px;
       background: var(--border);
       margin-bottom: 18px;
+      position: relative;
+      overflow: hidden;
     }
     .wf-connector.done { background: var(--accent); }
+    .wf-connector.flowing {
+      background: var(--border);
+    }
+    .wf-connector.flowing::after {
+      content: '';
+      position: absolute;
+      top: 0; left: -40px;
+      width: 40px; height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      animation: wfFlow 1.2s linear infinite;
+    }
+    @keyframes wfFlow {
+      0% { left: -40px; }
+      100% { left: 40px; }
+    }
 
     /* ===================== 步骤详情卡片 ===================== */
     .step-card {
@@ -862,8 +889,23 @@
      *  全局状态与配置
      * ===================================================== */
 
-    /** API 基础地址，默认使用当前域名，可由用户手动修改 */
-    let API_BASE = window.location.origin;
+    /** API 基础地址，启动时自动探测（8000/8001），可由用户手动修改 */
+    let API_BASE = '';
+
+    /**
+     * 自动探测 API 服务端口（依次尝试 8000、8001）
+     * @returns {Promise<string>} 可用的 API 基础地址
+     */
+    async function detectApiBase() {
+      const ports = [8000, 8001];
+      for (const port of ports) {
+        try {
+          const res = await fetch(`http://localhost:${port}/health`, { signal: AbortSignal.timeout(2000) });
+          if (res.ok) return `http://localhost:${port}`;
+        } catch { /* 端口不可达，尝试下一个 */ }
+      }
+      return 'http://localhost:8000';
+    }
 
     /** 当前哈希路由 */
     let currentRoute = 'tasks';
@@ -1015,6 +1057,7 @@
       });
       // 清除旧轮询
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      if (_reportPollTimer) { clearInterval(_reportPollTimer); _reportPollTimer = null; }
       // 渲染视图
       switch (currentRoute) {
         case 'tasks': renderTasksView(); break;
@@ -1254,6 +1297,8 @@
         <div class="kpi-row"><div class="kpi-card"><div class="skeleton skeleton-text w60"></div><div class="skeleton skeleton-text w40" style="height:28px"></div></div></div>
         <div class="device-grid">${Array(3).fill('<div class="device-card"><div class="skeleton skeleton-text w80"></div><div class="skeleton skeleton-text w60"></div></div>').join('')}</div>`;
       try {
+        // 先调用 refresh 端点重新检测设备，再获取最新列表
+        await api('/api/v1/devices/refresh', { method: 'POST' }).catch(() => {});
         const devices = await api('/api/v1/devices');
         cachedDevices = devices || [];
         renderDevicesContent(devices || []);
@@ -1268,9 +1313,9 @@
      */
     function renderDevicesContent(devices) {
       const container = document.getElementById('viewContainer');
-      const online = devices.filter(d => (d.status||'').toLowerCase() === 'online').length;
+      const online = devices.filter(d => ['online','idle'].includes((d.status||'').toLowerCase())).length;
       const busy = devices.filter(d => (d.status||'').toLowerCase() === 'busy').length;
-      const offline = devices.filter(d => !['online','busy'].includes((d.status||'').toLowerCase())).length;
+      const offline = devices.filter(d => !['online','idle','busy'].includes((d.status||'').toLowerCase())).length;
 
       container.innerHTML = `
         <div class="top-bar">
@@ -1305,7 +1350,7 @@
           <div class="device-grid">
             ${devices.map((d, i) => {
               const status = (d.status||'offline').toLowerCase();
-              const dotClass = status === 'online' ? 'online' : status === 'busy' ? 'busy' : 'offline';
+              const dotClass = (status === 'online' || status === 'idle') ? 'online' : status === 'busy' ? 'busy' : 'offline';
               const platformIcon = (d.platform||'').toLowerCase() === 'ios'
                 ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.49 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83"/></svg>'
                 : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 16V9h14v7"/><path d="M2 16h20v2a2 2 0 01-2 2H4a2 2 0 01-2-2v-2z"/><path d="M8 9V6a4 4 0 018 0v3"/></svg>';
@@ -1321,7 +1366,7 @@
                   <div class="device-udid">${d.udid || d.device_id || '—'}</div>
                   <div class="device-status-row">
                     <div class="status-dot ${dotClass}"></div>
-                    <span style="color:${dotClass==='online'?'var(--success)':dotClass==='busy'?'var(--accent)':'var(--error)'}">${d.status || 'Unknown'}</span>
+                    <span style="color:${dotClass==='online'?'var(--success)':dotClass==='busy'?'var(--accent)':'var(--error)'}">${{idle:'在线',online:'在线',busy:'忙碌',offline:'离线'}[(d.status||'').toLowerCase()] || d.status || 'Unknown'}</span>
                   </div>
                 </div>`;
             }).join('')}
@@ -1337,15 +1382,44 @@
      * 渲染测试报告视图
      * @param {string} taskId - 任务 ID
      */
+    let _reportPollTimer = null;
+
+    /**
+     * 加载并渲染测试报告视图，任务运行中时自动轮询日志
+     * @param {string} taskId - 任务 ID
+     */
     async function renderReportView(taskId) {
       const container = document.getElementById('viewContainer');
       container.innerHTML = `<div class="spinner"></div>`;
+      // 清除旧的轮询定时器
+      if (_reportPollTimer) { clearInterval(_reportPollTimer); _reportPollTimer = null; }
       try {
-        const [task, report] = await Promise.all([
+        const [task, report, logs] = await Promise.all([
           api(`/api/v1/tests/${taskId}`),
-          api(`/api/v1/tests/${taskId}/report`).catch(() => null)
+          api(`/api/v1/tests/${taskId}/report`).catch(() => null),
+          api(`/api/v1/tests/${taskId}/logs`).catch(() => null)
         ]);
-        renderReportContent(task, report);
+        renderReportContent(task, report, logs);
+        // 任务运行中时，每 3 秒自动刷新日志（局部更新避免闪烁）
+        if (task && task.status === 'running') {
+          _reportPollTimer = setInterval(async () => {
+            try {
+              const [updatedTask, updatedLogs] = await Promise.all([
+                api(`/api/v1/tests/${taskId}`),
+                api(`/api/v1/tests/${taskId}/logs`).catch(() => null)
+              ]);
+              if (updatedTask && updatedTask.status !== 'running') {
+                // 任务已结束，停止轮询，重新加载完整报告
+                clearInterval(_reportPollTimer); _reportPollTimer = null;
+                renderReportView(taskId);
+                return;
+              }
+              // 局部更新工作流步骤条和节点日志
+              _updateWorkflowSteps(updatedTask, updatedLogs);
+              _updateNodeLogs(updatedLogs);
+            } catch { /* 轮询失败，不中断 */ }
+          }, 3000);
+        }
       } catch {
         container.innerHTML = `
           <div class="empty-state">
@@ -1361,21 +1435,57 @@
      * @param {object} task - 任务基本信息
      * @param {object|null} report - 报告详情数据
      */
-    function renderReportContent(task, report) {
+    function renderReportContent(task, report, logs) {
       const container = document.getElementById('viewContainer');
       const steps = (report && report.steps) || [];
-      const workflowPhases = ['Explore', 'Planner', 'Executor', 'Verifier', 'Reviewer'];
-      // 判断工作流当前阶段
-      let activePhase = -1;
-      if (report && report.summary) {
-        const summaryLower = (report.summary || '').toLowerCase();
-        workflowPhases.forEach((phase, i) => {
-          if (summaryLower.includes(phase.toLowerCase())) activePhase = Math.max(activePhase, i);
-        });
+      const workflowPhases = ['explorer', 'planner', 'executor', 'verifier', 'reviewer'];
+      const phaseLabels = ['Explore', 'Planner', 'Executor', 'Verifier', 'Reviewer'];
+
+      // 基于 node_logs 判断每个节点的状态
+      const nodeLogMap = {};
+      if (logs && logs.node_logs) {
+        for (const log of logs.node_logs) {
+          const key = (log.node || '').toLowerCase();
+          // 保留最后一条日志（同一节点可能多次执行）
+          nodeLogMap[key] = log;
+        }
       }
-      // 如果任务已完成，全部步骤高亮
-      const isComplete = ['completed','success','passed'].includes((task.status||'').toLowerCase());
-      if (isComplete) activePhase = workflowPhases.length - 1;
+
+      // 判定每个阶段的状态：completed / failed / active / pending
+      const phaseStates = workflowPhases.map((phase, i) => {
+        const log = nodeLogMap[phase];
+        if (log) {
+          const s = (log.status || '').toLowerCase();
+          if (s === 'success') return 'completed';
+          if (s === 'failed') return 'failed';
+          // completed 但无法确定结果，当作成功
+          if (s === 'completed') return 'completed';
+        }
+        return 'pending';
+      });
+
+      // 判断当前正在执行的节点（第一个 pending 之前的节点，或任务 running 时最后一个已完成之后）
+      let activeIndex = -1;
+      if (task && (task.status || '').toLowerCase() === 'running') {
+        // 找到最后一个有状态的节点索引
+        for (let i = phaseStates.length - 1; i >= 0; i--) {
+          if (phaseStates[i] !== 'pending') {
+            // 如果这个节点是 failed，它就是当前活跃的
+            if (phaseStates[i] === 'failed') { activeIndex = i; break; }
+            // 否则下一个是活跃的
+            activeIndex = i + 1 < phaseStates.length ? i + 1 : -1;
+            break;
+          }
+        }
+        // 如果所有都是 pending，第一个是活跃的
+        if (activeIndex === -1 && phaseStates.every(s => s === 'pending')) {
+          activeIndex = 0;
+        }
+      }
+      // 如果任务已完成，没有活跃节点
+      if (task && ['completed','failed'].includes((task.status || '').toLowerCase())) {
+        activeIndex = -1;
+      }
 
       const tokenUsage = report && report.token_usage ? report.token_usage : null;
 
@@ -1413,18 +1523,26 @@
           </div>
         </div>
 
-        <div class="workflow-steps">
+        <div class="workflow-steps" id="workflowSteps">
           ${workflowPhases.map((phase, i) => {
-            const isDone = isComplete || i < activePhase;
-            const isActive = !isComplete && i === activePhase;
-            const cls = isDone ? 'completed' : isActive ? 'active' : '';
-            const connCls = (isDone && i < workflowPhases.length - 1) || (isComplete && i < workflowPhases.length - 1) ? 'done' : '';
+            let cls = phaseStates[i];
+            if (i === activeIndex) cls = 'active';
+            const isDone = cls === 'completed';
+            const isFailed = cls === 'failed';
+            const isActive = cls === 'active';
+            // 连接线状态：当前活跃节点前的连接线为 done，活跃节点到下一个为 flowing
+            let connCls = '';
+            if (isDone || isFailed) connCls = 'done';
+            else if (i === activeIndex || (i > 0 && i === activeIndex)) connCls = '';
+            // 下一个连接线是 flowing（从活跃节点出发）
+            const connFlowing = (isActive && i < workflowPhases.length - 1);
+            const finalConnCls = isDone || isFailed ? 'done' : connFlowing ? 'flowing' : '';
             return `
               <div class="wf-step ${cls}">
-                <div class="wf-step-dot">${isDone ? '✓' : i+1}</div>
-                <div class="wf-step-label">${phase}</div>
+                <div class="wf-step-dot">${isDone ? '✓' : isFailed ? '✗' : i+1}</div>
+                <div class="wf-step-label">${phaseLabels[i]}</div>
               </div>
-              ${i < workflowPhases.length - 1 ? `<div class="wf-connector ${connCls}"></div>` : ''}`;
+              ${i < workflowPhases.length - 1 ? `<div class="wf-connector ${finalConnCls}"></div>` : ''}`;
           }).join('')}
         </div>
 
@@ -1496,12 +1614,136 @@
           </div>
         `}
 
+        ${logs && logs.node_logs && logs.node_logs.length > 0 ? `
+          <h3 style="font-size:15px;font-weight:600;margin-bottom:12px;margin-top:24px">节点执行日志</h3>
+          <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden" id="nodeLogsContainer">
+            ${logs.node_logs.map((log, i) => {
+              const nodeStatus = (log.status || '').toLowerCase();
+              const isFailed = nodeStatus === 'failed' || log.error;
+              const isSuccess = nodeStatus === 'success';
+              const nodeIcon = isSuccess ? '✓' : isFailed ? '✗' : '●';
+              const iconColor = isSuccess ? 'var(--success)' : isFailed ? 'var(--error)' : 'var(--text-muted)';
+              return `
+                <div style="padding:10px 14px;border-bottom:1px solid var(--border);${i === logs.node_logs.length - 1 ? 'border-bottom:none' : ''}">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:${log.output_summary && Object.keys(log.output_summary).length > 0 || log.error ? '6px' : '0'}">
+                    <span style="color:${iconColor};font-weight:700;font-size:14px">${nodeIcon}</span>
+                    <span style="font-family:var(--font-mono);font-weight:600;font-size:13px">${log.node}</span>
+                    <span style="font-size:11px;color:var(--text-muted)">${log.timestamp || ''}</span>
+                  </div>
+                  ${log.error ? `<div style="font-family:var(--font-mono);font-size:12px;color:var(--error);background:var(--error-dim);padding:6px 8px;border-radius:4px;margin-top:4px;word-break:break-all">${log.error}</div>` : ''}
+                  ${log.output_summary && Object.keys(log.output_summary).length > 0 ? `
+                    <div style="font-family:var(--font-mono);font-size:12px;color:var(--text-secondary);background:var(--bg-deep);padding:6px 8px;border-radius:4px;margin-top:4px;white-space:pre-wrap;max-height:120px;overflow-y:auto">
+                      ${Object.entries(log.output_summary).map(([k,v]) => `<span style="color:var(--accent)">${k}:</span> ${typeof v === 'string' ? v.substring(0,200) : JSON.stringify(v).substring(0,200)}`).join('\n')}
+                    </div>
+                  ` : ''}
+                </div>`;
+            }).join('')}
+          </div>
+        ` : ''}
+
         <div style="margin-top:24px;display:flex;gap:12px">
           <a class="btn-download" href="${API_BASE.replace(/\/+$/,'')}/api/v1/tests/${task.task_id}/report/file?format=html" target="_blank">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             下载 HTML 报告
           </a>
         </div>`;
+    }
+
+    /**
+     * 计算工作流各阶段状态（供局部更新复用）
+     * @param {object} task - 任务数据
+     * @param {object|null} logs - 日志数据
+     * @returns {{phaseStates: string[], activeIndex: number}}
+     */
+    function _computePhaseStates(task, logs) {
+      const workflowPhases = ['explorer', 'planner', 'executor', 'verifier', 'reviewer'];
+      const nodeLogMap = {};
+      if (logs && logs.node_logs) {
+        for (const log of logs.node_logs) {
+          nodeLogMap[(log.node || '').toLowerCase()] = log;
+        }
+      }
+      const phaseStates = workflowPhases.map(phase => {
+        const log = nodeLogMap[phase];
+        if (log) {
+          const s = (log.status || '').toLowerCase();
+          if (s === 'success') return 'completed';
+          if (s === 'failed') return 'failed';
+          if (s === 'completed') return 'completed';
+        }
+        return 'pending';
+      });
+      let activeIndex = -1;
+      if (task && (task.status || '').toLowerCase() === 'running') {
+        for (let i = phaseStates.length - 1; i >= 0; i--) {
+          if (phaseStates[i] !== 'pending') {
+            if (phaseStates[i] === 'failed') { activeIndex = i; break; }
+            activeIndex = i + 1 < phaseStates.length ? i + 1 : -1;
+            break;
+          }
+        }
+        if (activeIndex === -1 && phaseStates.every(s => s === 'pending')) activeIndex = 0;
+      }
+      if (task && ['completed','failed'].includes((task.status || '').toLowerCase())) activeIndex = -1;
+      return { phaseStates, activeIndex };
+    }
+
+    /**
+     * 局部更新工作流步骤条（避免整页重绘闪烁）
+     * @param {object} task - 任务数据
+     * @param {object|null} logs - 日志数据
+     */
+    function _updateWorkflowSteps(task, logs) {
+      const el = document.getElementById('workflowSteps');
+      if (!el) return;
+      const workflowPhases = ['explorer', 'planner', 'executor', 'verifier', 'reviewer'];
+      const phaseLabels = ['Explore', 'Planner', 'Executor', 'Verifier', 'Reviewer'];
+      const { phaseStates, activeIndex } = _computePhaseStates(task, logs);
+      el.innerHTML = workflowPhases.map((phase, i) => {
+        let cls = phaseStates[i];
+        if (i === activeIndex) cls = 'active';
+        const isDone = cls === 'completed';
+        const isFailed = cls === 'failed';
+        const isActive = cls === 'active';
+        const connFlowing = isActive && i < workflowPhases.length - 1;
+        const finalConnCls = isDone || isFailed ? 'done' : connFlowing ? 'flowing' : '';
+        return `
+          <div class="wf-step ${cls}">
+            <div class="wf-step-dot">${isDone ? '✓' : isFailed ? '✗' : i+1}</div>
+            <div class="wf-step-label">${phaseLabels[i]}</div>
+          </div>
+          ${i < workflowPhases.length - 1 ? `<div class="wf-connector ${finalConnCls}"></div>` : ''}`;
+      }).join('');
+    }
+
+    /**
+     * 局部更新节点日志区域（避免整页重绘闪烁）
+     * @param {object|null} logs - 日志数据
+     */
+    function _updateNodeLogs(logs) {
+      const el = document.getElementById('nodeLogsContainer');
+      if (!el || !logs || !logs.node_logs || logs.node_logs.length === 0) return;
+      el.innerHTML = logs.node_logs.map((log, i) => {
+        const nodeStatus = (log.status || '').toLowerCase();
+        const isFailed = nodeStatus === 'failed' || log.error;
+        const isSuccess = nodeStatus === 'success';
+        const nodeIcon = isSuccess ? '✓' : isFailed ? '✗' : '●';
+        const iconColor = isSuccess ? 'var(--success)' : isFailed ? 'var(--error)' : 'var(--text-muted)';
+        return `
+          <div style="padding:10px 14px;border-bottom:1px solid var(--border);${i === logs.node_logs.length - 1 ? 'border-bottom:none' : ''}">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:${log.output_summary && Object.keys(log.output_summary).length > 0 || log.error ? '6px' : '0'}">
+              <span style="color:${iconColor};font-weight:700;font-size:14px">${nodeIcon}</span>
+              <span style="font-family:var(--font-mono);font-weight:600;font-size:13px">${log.node}</span>
+              <span style="font-size:11px;color:var(--text-muted)">${log.timestamp || ''}</span>
+            </div>
+            ${log.error ? `<div style="font-family:var(--font-mono);font-size:12px;color:var(--error);background:var(--error-dim);padding:6px 8px;border-radius:4px;margin-top:4px;word-break:break-all">${log.error}</div>` : ''}
+            ${log.output_summary && Object.keys(log.output_summary).length > 0 ? `
+              <div style="font-family:var(--font-mono);font-size:12px;color:var(--text-secondary);background:var(--bg-deep);padding:6px 8px;border-radius:4px;margin-top:4px;white-space:pre-wrap;max-height:120px;overflow-y:auto">
+                ${Object.entries(log.output_summary).map(([k,v]) => `<span style="color:var(--accent)">${k}:</span> ${typeof v === 'string' ? v.substring(0,200) : JSON.stringify(v).substring(0,200)}`).join('\n')}
+              </div>
+            ` : ''}
+          </div>`;
+      }).join('');
     }
 
     /**
@@ -1630,9 +1872,10 @@
      * ===================================================== */
 
     /**
-     * 应用启动入口
+     * 应用启动入口，自动探测 API 端口后初始化界面
      */
-    function init() {
+    async function init() {
+      API_BASE = await detectApiBase();
       initApiBaseInput();
       checkHealth();
       healthTimer = setInterval(checkHealth, 15000);

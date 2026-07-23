@@ -110,6 +110,73 @@ langgraph_app: Any = None
 # ------------------------------------------------------------
 
 
+def _determine_node_status(node_name: str, node_output: dict[str, Any]) -> str:
+    """根据节点名称和输出内容判定节点执行状态。
+
+    各节点的成功/失败判断逻辑：
+    - explorer: 无 error 字段即为成功
+    - planner: 生成了 test_steps 且无 error 即为成功
+    - executor: 无 error 字段即为成功
+    - verifier: verification_passed 为 True 时成功，False 时失败
+    - reviewer: node_outputs.reviewer.passed 为 True 时成功，False 时失败
+
+    Args:
+        node_name: 节点名称（explorer/planner/executor/verifier/reviewer）
+        node_output: 节点返回的输出字典
+
+    Returns:
+        节点状态字符串：'success' | 'failed' | 'completed'
+    """
+    if not isinstance(node_output, dict):
+        return 'completed'
+
+    # 通用失败判断：有 error 字段
+    if node_output.get('error'):
+        return 'failed'
+
+    if node_name == 'verifier':
+        # verifier 的核心判断：verification_passed
+        passed = node_output.get('verification_passed')
+        if passed is True:
+            return 'success'
+        elif passed is False:
+            return 'failed'
+        # 检查 node_outputs.verifier.passed
+        verifier_output = node_output.get('node_outputs', {}).get('verifier', {})
+        if verifier_output.get('passed') is False:
+            return 'failed'
+        return 'completed'
+
+    elif node_name == 'reviewer':
+        # reviewer 的核心判断：node_outputs.reviewer.passed
+        reviewer_output = node_output.get('node_outputs', {}).get('reviewer', {})
+        if reviewer_output.get('passed') is True:
+            return 'success'
+        elif reviewer_output.get('passed') is False:
+            return 'failed'
+        return 'completed'
+
+    elif node_name == 'planner':
+        # planner 有 test_steps 且非空即为成功
+        steps = node_output.get('test_steps', [])
+        if steps:
+            return 'success'
+        return 'completed'
+
+    elif node_name == 'executor':
+        # executor 无 error 即为成功
+        executor_output = node_output.get('node_outputs', {}).get('executor', {})
+        if executor_output.get('error'):
+            return 'failed'
+        return 'success'
+
+    elif node_name == 'explorer':
+        # explorer 无 error 即为成功
+        return 'success'
+
+    return 'completed'
+
+
 async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
     """后台运行 LangGraph 工作流任务。
 
@@ -132,6 +199,8 @@ async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
     task['status'] = 'running'
     task['updated_at'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
     start_time = time.time()
+    # 节点执行日志列表，记录每个节点的输入/输出/耗时/错误
+    node_logs: list[dict[str, Any]] = []
 
     try:
         # 获取编译后的工作流
@@ -173,6 +242,29 @@ async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
             # 记录每个节点的事件
             for node_name, node_output in event.items():
                 logger.info(f"[Task {task_id}] 节点 {node_name} 执行完成")
+                # 根据节点输出判断成功/失败
+                node_status = _determine_node_status(node_name, node_output)
+                log_entry: dict[str, Any] = {
+                    'node': node_name,
+                    'status': node_status,
+                    'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                    'output_summary': {},
+                }
+                # 安全提取输出摘要（避免大对象导致日志过大）
+                if isinstance(node_output, dict):
+                    for key in ('next_action', 'analysis', 'test_plan', 'verification_passed',
+                                'final_verdict', 'feedback', 'total_tokens_used', 'error',
+                                'retry_count', 'current_step_index', 'reviewer_feedback'):
+                        if key in node_output:
+                            val = node_output[key]
+                            log_entry['output_summary'][key] = (
+                                str(val)[:500] if isinstance(val, str) and len(val) > 500 else val
+                            )
+                    # 从 node_outputs 子字典中提取节点特有信息
+                node_logs.append(log_entry)
+                # 实时写入 task_store，使前端可以实时查看
+                task['node_logs'] = node_logs.copy()
+                task['updated_at'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
             final_state = node_output if event else None
 
         # 如果没有获取到最终状态，尝试从检查点获取
@@ -199,6 +291,7 @@ async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
         task['quality_metrics'] = reviewer_output.get('quality_metrics', {})
         task['token_usage'] = {'total_tokens_used': final_state.get('total_tokens_used', 0)} if isinstance(final_state, dict) else {}
         task['final_verdict'] = reviewer_output.get('final_verdict', 'need_manual_check')
+        task['node_logs'] = node_logs
 
         logger.info(f"[Task {task_id}] 测试完成，耗时 {duration:.2f}s")
 
@@ -281,6 +374,16 @@ async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
         task['updated_at'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
         task['duration'] = time.time() - start_time
         task['error'] = str(e)
+        # 保存节点日志（即使失败也要记录已执行的节点）
+        task['node_logs'] = node_logs
+        # 记录失败节点
+        node_logs.append({
+            'node': 'workflow_error',
+            'status': 'failed',
+            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+            'error': str(e),
+            'error_type': type(e).__name__,
+        })
 
 
 # ------------------------------------------------------------
@@ -291,30 +394,91 @@ async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
 async def init_device_pool() -> None:
     """初始化设备池
 
-    从 devices.yaml 配置文件加载设备列表并存入全局设备池。
+    优先通过 adb devices 检测真实连接的设备，然后从 devices.yaml 补充配置信息。
+    如果 adb 不可用则回退到仅从配置文件加载。
     """
+    import shutil
+    import subprocess
+
     import yaml
 
+    device_pool.clear()
+
+    # 先加载 YAML 配置，用于补充设备名称等信息
+    config_devices: dict[str, dict[str, Any]] = {}
     config_path = settings.DEVICE_CONFIG_PATH
     try:
         with open(config_path) as f:
             data = yaml.safe_load(f)
-        device_pool.clear()
         for dev in data.get("devices", []):
-            device_pool.append(
-                {
-                    "device_id": dev["id"],
-                    "name": dev["name"],
-                    "platform": dev["platform"],
-                    "status": "idle",
-                    "udid": dev["udid"],
-                }
-            )
-        logger.info(f"设备池初始化完成，共加载 {len(device_pool)} 台设备")
+            config_devices[dev["udid"]] = dev
     except FileNotFoundError:
-        logger.warning(f"设备配置文件 {config_path} 未找到，设备池为空")
+        logger.warning(f"设备配置文件 {config_path} 未找到")
     except Exception as e:
-        logger.error(f"设备池初始化失败: {e}")
+        logger.error(f"设备配置文件加载失败: {e}")
+
+    # 尝试通过 adb 检测真实设备
+    adb_path = shutil.which("adb")
+    if not adb_path:
+        # 检查常见 macOS Android SDK 路径
+        sdk_adb = Path.home() / "Library/Android/sdk/platform-tools/adb"
+        if sdk_adb.exists():
+            adb_path = str(sdk_adb)
+
+    if adb_path:
+        try:
+            result = subprocess.run(
+                [adb_path, "devices"],
+                capture_output=True, text=True, timeout=10,
+            )
+            lines = result.stdout.strip().split("\n")[1:]  # 跳过首行标题
+            for line in lines:
+                parts = line.strip().split()
+                if len(parts) >= 2 and parts[1] == "device":
+                    udid = parts[0]
+                    cfg = config_devices.get(udid, {})
+                    # 通过 adb 获取真实设备型号名称，优先使用真实名称
+                    real_name = ""
+                    try:
+                        model = subprocess.run(
+                            [adb_path, "-s", udid, "shell", "getprop", "ro.product.model"],
+                            capture_output=True, text=True, timeout=5,
+                        ).stdout.strip()
+                        version = subprocess.run(
+                            [adb_path, "-s", udid, "shell", "getprop", "ro.build.version.release"],
+                            capture_output=True, text=True, timeout=5,
+                        ).stdout.strip()
+                        if model:
+                            real_name = f"{model} (Android {version})"
+                    except Exception:
+                        pass
+                    # 如果无法获取真实名称，回退到配置文件或默认值
+                    if not real_name:
+                        real_name = cfg.get("name", f"Android Device ({udid})")
+                    device_pool.append({
+                        "device_id": cfg.get("id", udid),
+                        "name": real_name,
+                        "platform": cfg.get("platform", "Android"),
+                        "status": "idle",
+                        "udid": udid,
+                    })
+            logger.info(f"通过 adb 检测到 {len(device_pool)} 台设备")
+        except Exception as e:
+            logger.warning(f"adb 检测设备失败: {e}")
+
+    # 仅当 adb 不可用时，才回退到配置文件
+    if not adb_path and not device_pool and config_devices:
+        for udid, dev in config_devices.items():
+            device_pool.append({
+                "device_id": dev["id"],
+                "name": dev["name"],
+                "platform": dev["platform"],
+                "status": "offline",
+                "udid": udid,
+            })
+        logger.info(f"adb 不可用，回退到配置文件，加载 {len(device_pool)} 台设备（离线）")
+
+    logger.info(f"设备池初始化完成，共 {len(device_pool)} 台设备")
 
 
 async def init_mcp_server() -> None:
@@ -568,6 +732,49 @@ async def list_devices() -> list[DeviceInfo]:
         )
         for dev in device_pool
     ]
+
+
+@app.post("/api/v1/devices/refresh")
+async def refresh_devices() -> dict[str, Any]:
+    """刷新设备列表端点
+
+    重新通过 adb 检测当前连接的设备，更新设备池。
+    """
+    await init_device_pool()
+    return {
+        "total": len(device_pool),
+        "devices": [
+            {
+                "device_id": dev["device_id"],
+                "name": dev["name"],
+                "platform": dev["platform"],
+                "status": dev["status"],
+                "udid": dev["udid"],
+            }
+            for dev in device_pool
+        ],
+    }
+
+
+@app.get("/api/v1/tests/{task_id}/logs")
+async def get_task_logs(task_id: str) -> dict[str, Any]:
+    """获取任务执行日志端点
+
+    返回指定任务的工作流节点执行日志，包含每个节点的状态、输出摘要和错误信息，
+    用于排查测试执行过程中的问题。
+    """
+    task = task_store.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
+
+    return {
+        "task_id": task_id,
+        "status": task["status"],
+        "error": task.get("error"),
+        "duration": task.get("duration"),
+        "node_logs": task.get("node_logs", []),
+        "token_usage": task.get("token_usage"),
+    }
 
 
 # ------------------------------------------------------------
