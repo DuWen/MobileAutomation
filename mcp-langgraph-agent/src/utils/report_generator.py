@@ -6,8 +6,6 @@
 
 from __future__ import annotations
 
-import json
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -307,10 +305,10 @@ class ReportGenerator:
         total_cost = token_summary.get("total_cost", 0.0)
 
         lines = [
-            f"# AI 自动化测试报告",
+            "# AI 自动化测试报告",
             "",
-            f"| 项目 | 值 |",
-            f"|------|-----|",
+            "| 项目 | 值 |",
+            "|------|-----|",
             f"| 任务 ID | `{task_id}` |",
             f"| 测试目标 | {test_goal} |",
             f"| 设备 | {device_name or 'N/A'} |",
@@ -322,8 +320,8 @@ class ReportGenerator:
             "",
             "## 执行步骤",
             "",
-            f"| # | 操作 | 结果 | 状态 |",
-            f"|---|------|------|------|",
+            "| # | 操作 | 结果 | 状态 |",
+            "|---|------|------|------|",
         ]
 
         for i, step in enumerate(executed_steps, 1):
