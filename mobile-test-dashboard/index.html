@@ -1,0 +1,1651 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MobileAutomation — Mission Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ===================== CSS 自定义属性（主题色板） ===================== */
+    :root {
+      --bg-deep: #0a0e17;
+      --bg-card: #111827;
+      --bg-hover: #1e2538;
+      --accent: #f59e0b;
+      --accent-dim: rgba(245,158,11,0.15);
+      --success: #10b981;
+      --success-dim: rgba(16,185,129,0.15);
+      --error: #ef4444;
+      --error-dim: rgba(239,68,68,0.15);
+      --warning: #f59e0b;
+      --warning-dim: rgba(245,158,11,0.15);
+      --text-primary: #e5e7eb;
+      --text-secondary: #9ca3af;
+      --text-muted: #6b7280;
+      --border: #1f2937;
+      --font-mono: 'JetBrains Mono', monospace;
+      --font-sans: 'DM Sans', sans-serif;
+      --sidebar-w: 260px;
+      --radius: 8px;
+      --transition: 0.2s ease;
+    }
+
+    /* ===================== 全局重置 ===================== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { font-size: 14px; }
+    body {
+      font-family: var(--font-sans);
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      display: flex;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    button { cursor: pointer; font-family: var(--font-sans); }
+    input, select, textarea { font-family: var(--font-sans); }
+
+    /* ===================== 滚动条美化 ===================== */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+    /* ===================== 侧边栏 ===================== */
+    .sidebar {
+      width: var(--sidebar-w);
+      min-width: var(--sidebar-w);
+      background: var(--bg-card);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      position: relative;
+      z-index: 10;
+    }
+    .sidebar-logo {
+      padding: 20px 20px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .sidebar-logo svg { flex-shrink: 0; }
+    .sidebar-logo-text {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: -0.5px;
+      color: var(--text-primary);
+      line-height: 1.2;
+    }
+    .sidebar-logo-text span { color: var(--accent); }
+    .sidebar-nav { flex: 1; padding: 12px 0; overflow-y: auto; }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 20px;
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 500;
+      border-left: 3px solid transparent;
+      transition: all var(--transition);
+      cursor: pointer;
+      user-select: none;
+    }
+    .nav-item:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+    .nav-item.active {
+      background: var(--accent-dim);
+      color: var(--accent);
+      border-left-color: var(--accent);
+    }
+    .nav-item svg { flex-shrink: 0; opacity: 0.7; }
+    .nav-item.active svg { opacity: 1; }
+    .sidebar-footer {
+      padding: 16px 20px;
+      border-top: 1px solid var(--border);
+    }
+    .conn-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+    .conn-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--error);
+      flex-shrink: 0;
+    }
+    .conn-dot.connected {
+      background: var(--success);
+      animation: breathe 2s ease-in-out infinite;
+    }
+    @keyframes breathe {
+      0%,100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.5); }
+      50% { box-shadow: 0 0 0 5px rgba(16,185,129,0); }
+    }
+    .api-input-group { display: flex; flex-direction: column; gap: 4px; }
+    .api-input-group label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+    .api-input {
+      background: var(--bg-deep);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 6px 8px;
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      outline: none;
+      transition: border-color var(--transition);
+      width: 100%;
+    }
+    .api-input:focus { border-color: var(--accent); }
+
+    /* ===================== 主内容区 ===================== */
+    .main {
+      flex: 1;
+      overflow-y: auto;
+      height: 100vh;
+      position: relative;
+      background:
+        linear-gradient(rgba(245,158,11,0.015) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(245,158,11,0.015) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+    .main-inner { padding: 28px 32px; max-width: 1400px; }
+
+    /* ===================== 顶部栏 ===================== */
+    .top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+    }
+    .top-bar h1 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-weight: 600;
+      border: none;
+      transition: all var(--transition);
+    }
+    .btn-accent {
+      background: var(--accent);
+      color: #000;
+    }
+    .btn-accent:hover {
+      box-shadow: 0 0 20px rgba(245,158,11,0.4);
+      transform: translateY(-1px);
+    }
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+    /* ===================== KPI 卡片 ===================== */
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .kpi-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      transition: all 0.3s ease;
+      animation: fadeSlideUp 0.4s ease both;
+    }
+    .kpi-card:nth-child(1) { animation-delay: 0.05s; }
+    .kpi-card:nth-child(2) { animation-delay: 0.10s; }
+    .kpi-card:nth-child(3) { animation-delay: 0.15s; }
+    .kpi-card:nth-child(4) { animation-delay: 0.20s; }
+    .kpi-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    }
+    .kpi-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .kpi-value {
+      font-family: var(--font-mono);
+      font-size: 30px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .kpi-value.total { color: var(--text-primary); }
+    .kpi-value.running { color: var(--accent); }
+    .kpi-value.success { color: var(--success); }
+    .kpi-value.error { color: var(--error); }
+
+    /* ===================== 筛选栏 ===================== */
+    .filter-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+    }
+    .filter-pills { display: flex; gap: 6px; }
+    .pill {
+      padding: 5px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all var(--transition);
+      user-select: none;
+    }
+    .pill:hover { border-color: var(--text-muted); color: var(--text-primary); }
+    .pill.active {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .search-input {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 6px 12px 6px 32px;
+      color: var(--text-primary);
+      font-size: 13px;
+      outline: none;
+      width: 220px;
+      transition: border-color var(--transition);
+      position: relative;
+    }
+    .search-input:focus { border-color: var(--accent); }
+    .search-wrap {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+    }
+    .search-wrap svg {
+      position: absolute;
+      left: 9px;
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+
+    /* ===================== 表格 ===================== */
+    .table-wrap {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      text-align: left;
+      padding: 11px 16px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-muted);
+      font-weight: 600;
+      background: rgba(0,0,0,0.2);
+      border-bottom: 1px solid var(--border);
+    }
+    tbody td {
+      padding: 10px 16px;
+      font-size: 13px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    tbody tr { transition: background var(--transition); }
+    tbody tr:hover { background: var(--bg-hover); }
+    tbody tr:last-child td { border-bottom: none; }
+    .task-id {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--accent);
+      cursor: pointer;
+    }
+    .task-id:hover { text-decoration: underline; }
+
+    /* ===================== 状态徽章 ===================== */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .badge-pending   { background: rgba(107,114,128,0.2); color: var(--text-secondary); }
+    .badge-running   { background: var(--accent-dim); color: var(--accent); }
+    .badge-completed { background: var(--success-dim); color: var(--success); }
+    .badge-failed    { background: var(--error-dim); color: var(--error); }
+    .badge-running .badge-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%,100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* ===================== 设备网格 ===================== */
+    .device-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .device-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      transition: all 0.3s ease;
+      animation: fadeSlideUp 0.4s ease both;
+    }
+    .device-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    }
+    .device-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .device-name { font-weight: 600; font-size: 14px; }
+    .device-platform {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+    }
+    .device-udid {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      background: var(--bg-deep);
+      padding: 4px 8px;
+      border-radius: 4px;
+      margin-top: 10px;
+      word-break: break-all;
+    }
+    .device-status-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 12px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-dot.online { background: var(--success); box-shadow: 0 0 6px rgba(16,185,129,0.5); }
+    .status-dot.busy   { background: var(--accent);  box-shadow: 0 0 6px rgba(245,158,11,0.5); }
+    .status-dot.offline{ background: var(--error);   box-shadow: 0 0 6px rgba(239,68,68,0.5); }
+
+    /* ===================== 报告页 ===================== */
+    .breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 20px;
+    }
+    .breadcrumb a { color: var(--text-secondary); }
+    .breadcrumb a:hover { color: var(--accent); }
+    .breadcrumb .sep { color: var(--text-muted); }
+    .breadcrumb .current { color: var(--text-primary); }
+    .report-header-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 24px;
+      animation: fadeSlideUp 0.4s ease both;
+    }
+    .report-meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .report-meta-item label {
+      display: block;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .report-meta-item span {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--text-primary);
+    }
+
+    /* ===================== 工作流步骤指示器 ===================== */
+    .workflow-steps {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      margin-bottom: 24px;
+      animation: fadeSlideUp 0.4s ease both;
+      animation-delay: 0.1s;
+    }
+    .wf-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      position: relative;
+      flex: 1;
+    }
+    .wf-step-dot {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      background: var(--bg-card);
+      border: 2px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      transition: all 0.3s ease;
+      z-index: 1;
+    }
+    .wf-step.completed .wf-step-dot {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #000;
+    }
+    .wf-step.active .wf-step-dot {
+      border-color: var(--accent);
+      color: var(--accent);
+      box-shadow: 0 0 12px rgba(245,158,11,0.3);
+    }
+    .wf-step-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+    .wf-step.completed .wf-step-label,
+    .wf-step.active .wf-step-label { color: var(--accent); }
+    .wf-connector {
+      flex: 0 0 40px;
+      height: 2px;
+      background: var(--border);
+      margin-bottom: 18px;
+    }
+    .wf-connector.done { background: var(--accent); }
+
+    /* ===================== 步骤详情卡片 ===================== */
+    .step-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 10px;
+      overflow: hidden;
+      transition: all var(--transition);
+      animation: fadeSlideUp 0.35s ease both;
+    }
+    .step-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      cursor: pointer;
+      user-select: none;
+      transition: background var(--transition);
+    }
+    .step-card-header:hover { background: var(--bg-hover); }
+    .step-card-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .step-num {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
+      background: var(--bg-deep);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .step-action { font-weight: 500; font-size: 13px; }
+    .step-card-body {
+      padding: 0 16px 14px;
+      display: none;
+    }
+    .step-card.open .step-card-body { display: block; }
+    .step-result {
+      background: var(--bg-deep);
+      border-radius: 4px;
+      padding: 10px 14px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-secondary);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .step-status-badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    /* ===================== 模态框 ===================== */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal-overlay.show { display: flex; }
+    .modal {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px;
+      width: 460px;
+      max-width: 90vw;
+      animation: modalIn 0.25s ease;
+    }
+    @keyframes modalIn {
+      from { opacity: 0; transform: scale(0.92); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+    .modal h2 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 20px;
+    }
+    .form-group { margin-bottom: 16px; }
+    .form-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+    .form-control {
+      width: 100%;
+      background: var(--bg-deep);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 9px 12px;
+      color: var(--text-primary);
+      font-size: 13px;
+      outline: none;
+      transition: border-color var(--transition);
+    }
+    .form-control:focus { border-color: var(--accent); }
+    textarea.form-control { resize: vertical; min-height: 80px; }
+    select.form-control { cursor: pointer; }
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    /* ===================== Toast 通知 ===================== */
+    .toast-container {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 2000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .toast {
+      padding: 12px 18px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-weight: 500;
+      color: #fff;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+      animation: toastIn 0.3s ease, toastOut 0.3s ease 2.7s forwards;
+      max-width: 360px;
+    }
+    .toast-success { background: #065f46; border-left: 3px solid var(--success); }
+    .toast-error   { background: #7f1d1d; border-left: 3px solid var(--error); }
+    .toast-info    { background: #1e3a5f; border-left: 3px solid #3b82f6; }
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateX(40px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes toastOut {
+      from { opacity: 1; transform: translateX(0); }
+      to   { opacity: 0; transform: translateX(40px); }
+    }
+
+    /* ===================== 骨架屏 ===================== */
+    .skeleton {
+      background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-hover) 50%, var(--bg-card) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 4px;
+    }
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    .skeleton-text { height: 14px; margin-bottom: 6px; }
+    .skeleton-text.w60 { width: 60%; }
+    .skeleton-text.w80 { width: 80%; }
+    .skeleton-text.w40 { width: 40%; }
+
+    /* ===================== 下载按钮 ===================== */
+    .btn-download {
+      background: transparent;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      padding: 8px 16px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all var(--transition);
+    }
+    .btn-download:hover {
+      background: var(--accent-dim);
+    }
+
+    /* ===================== 空状态 ===================== */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+    }
+    .empty-state svg { margin-bottom: 12px; opacity: 0.4; }
+    .empty-state p { font-size: 14px; }
+
+    /* ===================== 加载旋转器 ===================== */
+    .spinner {
+      width: 32px; height: 32px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 40px auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ===================== 通用动画 ===================== */
+    @keyframes fadeSlideUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .anim-row { animation: fadeSlideUp 0.35s ease both; }
+
+    /* ===================== 报告摘要 ===================== */
+    .report-summary {
+      font-size: 14px;
+      line-height: 1.7;
+      color: var(--text-secondary);
+      margin-bottom: 20px;
+      padding: 16px 20px;
+      background: var(--bg-deep);
+      border-radius: var(--radius);
+      border-left: 3px solid var(--accent);
+    }
+
+    /* ===================== 质量指标网格 ===================== */
+    .quality-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .quality-item {
+      background: var(--bg-deep);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+    }
+    .quality-item label {
+      display: block;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .quality-item span {
+      font-family: var(--font-mono);
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    /* ===================== 响应式 ===================== */
+    @media (max-width: 768px) {
+      .sidebar { width: 60px; min-width: 60px; }
+      .sidebar-logo-text, .nav-item span, .sidebar-footer { display: none; }
+      .nav-item { justify-content: center; padding: 12px; }
+      .main-inner { padding: 16px; }
+      .kpi-row { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ==================== 侧边栏 ==================== -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>
+      </svg>
+      <div class="sidebar-logo-text">Mobile<span>Auto</span></div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-item active" data-route="tasks" onclick="navigate('tasks')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+        </svg>
+        <span>任务总览</span>
+      </div>
+      <div class="nav-item" data-route="devices" onclick="navigate('devices')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="12" x2="6.01" y2="12"/><line x1="10" y1="12" x2="10.01" y2="12"/>
+        </svg>
+        <span>设备管理</span>
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="conn-status">
+        <div class="conn-dot" id="connDot"></div>
+        <span id="connLabel">未连接</span>
+      </div>
+      <div class="api-input-group">
+        <label>API 基础地址</label>
+        <input type="text" class="api-input" id="apiBaseInput" value="" placeholder="http://localhost:8000" />
+      </div>
+    </div>
+  </aside>
+
+  <!-- ==================== 主内容区 ==================== -->
+  <main class="main" id="mainContent">
+    <div class="main-inner" id="viewContainer">
+      <!-- 由 JS 动态渲染 -->
+    </div>
+  </main>
+
+  <!-- ==================== 模态框：新建测试 ==================== -->
+  <div class="modal-overlay" id="modalOverlay" onclick="closeModalOutside(event)">
+    <div class="modal">
+      <h2>新建测试任务</h2>
+      <div class="form-group">
+        <label>应用描述 <span style="color:var(--error)">*</span></label>
+        <textarea class="form-control" id="formAppDesc" placeholder="描述你要测试的移动应用及测试目标…" required></textarea>
+      </div>
+      <div class="form-group">
+        <label>目标设备</label>
+        <select class="form-control" id="formDeviceId">
+          <option value="">自动选择</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>超时时间（秒）</label>
+        <input type="number" class="form-control" id="formTimeout" placeholder="300" min="30" max="3600" />
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+        <button class="btn btn-accent" id="btnSubmitTest" onclick="submitNewTest()">启动测试</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== Toast 容器 ==================== -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script>
+    /* =====================================================
+     *  全局状态与配置
+     * ===================================================== */
+
+    /** API 基础地址，默认使用当前域名，可由用户手动修改 */
+    let API_BASE = window.location.origin;
+
+    /** 当前哈希路由 */
+    let currentRoute = 'tasks';
+
+    /** 轮询计时器 ID */
+    let pollTimer = null;
+
+    /** 健康检查计时器 ID */
+    let healthTimer = null;
+
+    /** 当前筛选状态 */
+    let filterStatus = 'all';
+
+    /** 搜索关键词 */
+    let searchQuery = '';
+
+    /** 缓存的设备列表（用于新建测试模态框） */
+    let cachedDevices = [];
+
+    /* =====================================================
+     *  工具函数
+     * ===================================================== */
+
+    /**
+     * 显示 toast 通知
+     * @param {string} message - 通知内容
+     * @param {'success'|'error'|'info'} type - 通知类型
+     */
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = `toast toast-${type}`;
+      toast.textContent = message;
+      container.appendChild(toast);
+      setTimeout(() => { toast.remove(); }, 3100);
+    }
+
+    /**
+     * 格式化时间为人类可读格式
+     * @param {string|number} ts - ISO 字符串或时间戳
+     * @returns {string} 格式化后的时间字符串
+     */
+    function formatTime(ts) {
+      if (!ts) return '—';
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) return ts;
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    /**
+     * 格式化持续时间为人类可读格式
+     * @param {number} seconds - 秒数
+     * @returns {string} 格式化后的持续时间
+     */
+    function formatDuration(seconds) {
+      if (!seconds && seconds !== 0) return '—';
+      if (seconds < 60) return `${seconds.toFixed(1)}s`;
+      const m = Math.floor(seconds / 60);
+      const s = Math.round(seconds % 60);
+      if (m < 60) return `${m}m ${s}s`;
+      const h = Math.floor(m / 60);
+      return `${h}h ${m % 60}m`;
+    }
+
+    /**
+     * 截断任务 ID 显示
+     * @param {string} id - 完整任务 ID
+     * @returns {string} 截断后的 ID
+     */
+    function truncateId(id) {
+      if (!id) return '—';
+      return id.length > 12 ? id.slice(0, 8) + '…' + id.slice(-4) : id;
+    }
+
+    /**
+     * 获取状态对应的 CSS class 后缀
+     * @param {string} status - 任务状态
+     * @returns {string} CSS class 后缀
+     */
+    function statusClass(status) {
+      const s = (status || '').toLowerCase();
+      if (s === 'completed' || s === 'success' || s === 'passed') return 'completed';
+      if (s === 'running') return 'running';
+      if (s === 'failed' || s === 'error') return 'failed';
+      return 'pending';
+    }
+
+    /**
+     * 通用 API 请求封装
+     * @param {string} path - API 路径（不含基础地址）
+     * @param {object} options - fetch 选项
+     * @returns {Promise<any>} 解析后的 JSON 数据
+     */
+    async function api(path, options = {}) {
+      const url = API_BASE.replace(/\/+$/, '') + path;
+      try {
+        const res = await fetch(url, {
+          headers: { 'Content-Type': 'application/json' },
+          ...options
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || err.message || `HTTP ${res.status}`);
+        }
+        return await res.json();
+      } catch (e) {
+        showToast(e.message || '请求失败', 'error');
+        throw e;
+      }
+    }
+
+    /* =====================================================
+     *  路由系统
+     * ===================================================== */
+
+    /**
+     * 解析当前哈希并更新路由状态
+     */
+    function parseRoute() {
+      const hash = window.location.hash.replace('#', '') || 'tasks';
+      if (hash.startsWith('report/')) {
+        currentRoute = 'report';
+        currentRouteParams = { task_id: hash.replace('report/', '') };
+      } else {
+        currentRoute = hash;
+        currentRouteParams = {};
+      }
+    }
+    let currentRouteParams = {};
+
+    /**
+     * 导航到指定路由
+     * @param {string} route - 目标路由
+     */
+    function navigate(route) {
+      window.location.hash = route;
+    }
+
+    /**
+     * 主路由分发器，根据当前路由渲染对应视图
+     */
+    function router() {
+      parseRoute();
+      // 更新侧边栏高亮
+      document.querySelectorAll('.nav-item').forEach(item => {
+        const r = item.dataset.route;
+        item.classList.toggle('active', r === currentRoute || (currentRoute === 'report' && r === 'tasks'));
+      });
+      // 清除旧轮询
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      // 渲染视图
+      switch (currentRoute) {
+        case 'tasks': renderTasksView(); break;
+        case 'devices': renderDevicesView(); break;
+        case 'report': renderReportView(currentRouteParams.task_id); break;
+        default: navigate('tasks');
+      }
+    }
+
+    /* =====================================================
+     *  健康检查与连接状态
+     * ===================================================== */
+
+    /**
+     * 轮询 /health 端点并更新连接状态指示器
+     */
+    async function checkHealth() {
+      const dot = document.getElementById('connDot');
+      const label = document.getElementById('connLabel');
+      try {
+        const data = await api('/health');
+        dot.classList.add('connected');
+        label.textContent = `${data.app_name || 'Connected'} v${data.version || ''}`;
+        label.style.color = 'var(--success)';
+      } catch {
+        dot.classList.remove('connected');
+        label.textContent = '未连接';
+        label.style.color = 'var(--error)';
+      }
+    }
+
+    /* =====================================================
+     *  视图 1：任务总览
+     * ===================================================== */
+
+    /**
+     * 渲染任务总览视图
+     */
+    async function renderTasksView() {
+      const container = document.getElementById('viewContainer');
+      container.innerHTML = renderTasksSkeleton();
+      try {
+        const data = await api('/api/v1/tests');
+        const tasks = data.tasks || [];
+        renderTasksContent(tasks);
+        // 如果有运行中的任务则启动自动刷新
+        startTaskPolling(tasks);
+      } catch {
+        renderTasksContent([]);
+      }
+    }
+
+    /**
+     * 渲染任务视图骨架屏
+     * @returns {string} 骨架屏 HTML
+     */
+    function renderTasksSkeleton() {
+      return `
+        <div class="top-bar">
+          <h1>任务总览</h1>
+          <button class="btn btn-accent" onclick="openModal()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            新建测试
+          </button>
+        </div>
+        <div class="kpi-row">
+          ${[1,2,3,4].map(() => `<div class="kpi-card"><div class="skeleton skeleton-text w60"></div><div class="skeleton skeleton-text w40" style="height:28px"></div></div>`).join('')}
+        </div>
+        <div class="table-wrap" style="padding:20px">
+          ${[1,2,3,4,5].map(() => `<div class="skeleton skeleton-text w80" style="margin-bottom:10px"></div>`).join('')}
+        </div>`;
+    }
+
+    /**
+     * 渲染任务视图实际内容
+     * @param {Array} tasks - 任务列表
+     */
+    function renderTasksContent(tasks) {
+      const container = document.getElementById('viewContainer');
+      const today = new Date().toDateString();
+      const total = tasks.length;
+      const running = tasks.filter(t => (t.status||'').toLowerCase() === 'running').length;
+      const completedToday = tasks.filter(t => {
+        const s = (t.status||'').toLowerCase();
+        return (s === 'completed' || s === 'success' || s === 'passed') && new Date(t.created_at).toDateString() === today;
+      }).length;
+      const failed = tasks.filter(t => (t.status||'').toLowerCase() === 'failed').length;
+
+      // 根据筛选条件过滤
+      let filtered = tasks;
+      if (filterStatus !== 'all') {
+        const s = filterStatus.toLowerCase();
+        filtered = tasks.filter(t => (t.status||'').toLowerCase() === s);
+      }
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        filtered = filtered.filter(t =>
+          (t.task_id||'').toLowerCase().includes(q) ||
+          (t.app_description||'').toLowerCase().includes(q) ||
+          (t.device_id||'').toLowerCase().includes(q)
+        );
+      }
+
+      container.innerHTML = `
+        <div class="top-bar">
+          <h1>任务总览</h1>
+          <button class="btn btn-accent" onclick="openModal()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            新建测试
+          </button>
+        </div>
+
+        <div class="kpi-row">
+          <div class="kpi-card">
+            <div class="kpi-label">总任务数</div>
+            <div class="kpi-value total">${total}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">运行中</div>
+            <div class="kpi-value running">${running}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">今日完成</div>
+            <div class="kpi-value success">${completedToday}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">失败</div>
+            <div class="kpi-value error">${failed}</div>
+          </div>
+        </div>
+
+        <div class="filter-row">
+          <div class="filter-pills">
+            ${['all','pending','running','completed','failed'].map(s =>
+              `<div class="pill ${filterStatus===s?'active':''}" onclick="setFilter('${s}')">${s === 'all' ? '全部' : s.charAt(0).toUpperCase()+s.slice(1)}</div>`
+            ).join('')}
+          </div>
+          <div class="search-wrap">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input class="search-input" placeholder="搜索任务…" value="${searchQuery}" oninput="setSearch(this.value)" />
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          ${filtered.length === 0 ? `
+            <div class="empty-state">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <p>暂无${filterStatus !== 'all' ? filterStatus : ''}任务数据</p>
+            </div>
+          ` : `
+            <table>
+              <thead>
+                <tr>
+                  <th>任务 ID</th>
+                  <th>描述</th>
+                  <th>状态</th>
+                  <th>设备</th>
+                  <th>创建时间</th>
+                  <th>耗时</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filtered.map((t, i) => `
+                  <tr class="anim-row" style="animation-delay:${i*0.04}s">
+                    <td><span class="task-id" onclick="navigate('report/${t.task_id}')" title="${t.task_id}">${truncateId(t.task_id)}</span></td>
+                    <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${t.app_description||''}">${t.app_description || '—'}</td>
+                    <td><span class="badge badge-${statusClass(t.status)}">${statusClass(t.status) === 'running' ? '<span class="badge-dot"></span>' : ''}${t.status || 'pending'}</span></td>
+                    <td style="font-family:var(--font-mono);font-size:12px">${t.device_id || '—'}</td>
+                    <td style="font-family:var(--font-mono);font-size:12px">${formatTime(t.created_at)}</td>
+                    <td style="font-family:var(--font-mono);font-size:12px">${formatDuration(t.duration)}</td>
+                    <td><button class="btn btn-ghost btn-sm" onclick="navigate('report/${t.task_id}')">查看报告</button></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          `}
+        </div>`;
+    }
+
+    /**
+     * 设置状态筛选并重新渲染
+     * @param {string} status - 筛选状态
+     */
+    function setFilter(status) {
+      filterStatus = status;
+      renderTasksView();
+    }
+
+    /**
+     * 设置搜索关键词并重新渲染
+     * @param {string} q - 搜索关键词
+     */
+    function setSearch(q) {
+      searchQuery = q;
+      renderTasksView();
+    }
+
+    /**
+     * 启动任务列表自动轮询
+     * @param {Array} tasks - 当前任务列表
+     */
+    function startTaskPolling(tasks) {
+      const hasRunning = tasks.some(t => (t.status||'').toLowerCase() === 'running');
+      if (hasRunning) {
+        pollTimer = setInterval(async () => {
+          try {
+            const data = await api('/api/v1/tests');
+            renderTasksContent(data.tasks || []);
+            // 如果没有运行中的任务了则停止轮询
+            if (!data.tasks.some(t => (t.status||'').toLowerCase() === 'running')) {
+              clearInterval(pollTimer);
+              pollTimer = null;
+            }
+          } catch { /* 静默处理轮询错误 */ }
+        }, 5000);
+      }
+    }
+
+    /* =====================================================
+     *  视图 2：设备管理
+     * ===================================================== */
+
+    /**
+     * 渲染设备管理视图
+     */
+    async function renderDevicesView() {
+      const container = document.getElementById('viewContainer');
+      container.innerHTML = `
+        <div class="top-bar">
+          <h1>设备管理</h1>
+          <button class="btn btn-ghost" onclick="renderDevicesView()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+            刷新
+          </button>
+        </div>
+        <div class="kpi-row"><div class="kpi-card"><div class="skeleton skeleton-text w60"></div><div class="skeleton skeleton-text w40" style="height:28px"></div></div></div>
+        <div class="device-grid">${Array(3).fill('<div class="device-card"><div class="skeleton skeleton-text w80"></div><div class="skeleton skeleton-text w60"></div></div>').join('')}</div>`;
+      try {
+        const devices = await api('/api/v1/devices');
+        cachedDevices = devices || [];
+        renderDevicesContent(devices || []);
+      } catch {
+        renderDevicesContent([]);
+      }
+    }
+
+    /**
+     * 渲染设备管理视图实际内容
+     * @param {Array} devices - 设备列表
+     */
+    function renderDevicesContent(devices) {
+      const container = document.getElementById('viewContainer');
+      const online = devices.filter(d => (d.status||'').toLowerCase() === 'online').length;
+      const busy = devices.filter(d => (d.status||'').toLowerCase() === 'busy').length;
+      const offline = devices.filter(d => !['online','busy'].includes((d.status||'').toLowerCase())).length;
+
+      container.innerHTML = `
+        <div class="top-bar">
+          <h1>设备管理</h1>
+          <button class="btn btn-ghost" onclick="renderDevicesView()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+            刷新
+          </button>
+        </div>
+
+        <div class="kpi-row">
+          <div class="kpi-card">
+            <div class="kpi-label">在线</div>
+            <div class="kpi-value success">${online}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">忙碌</div>
+            <div class="kpi-value running">${busy}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">离线</div>
+            <div class="kpi-value error">${offline}</div>
+          </div>
+        </div>
+
+        ${devices.length === 0 ? `
+          <div class="empty-state">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="12" x2="6.01" y2="12"/></svg>
+            <p>暂无设备数据</p>
+          </div>
+        ` : `
+          <div class="device-grid">
+            ${devices.map((d, i) => {
+              const status = (d.status||'offline').toLowerCase();
+              const dotClass = status === 'online' ? 'online' : status === 'busy' ? 'busy' : 'offline';
+              const platformIcon = (d.platform||'').toLowerCase() === 'ios'
+                ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.49 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83"/></svg>'
+                : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 16V9h14v7"/><path d="M2 16h20v2a2 2 0 01-2 2H4a2 2 0 01-2-2v-2z"/><path d="M8 9V6a4 4 0 018 0v3"/></svg>';
+              return `
+                <div class="device-card anim-row" style="animation-delay:${i*0.08}s">
+                  <div class="device-header">
+                    ${platformIcon}
+                    <div>
+                      <div class="device-name">${d.name || d.device_id || '—'}</div>
+                      <div class="device-platform">${d.platform || 'Unknown'}</div>
+                    </div>
+                  </div>
+                  <div class="device-udid">${d.udid || d.device_id || '—'}</div>
+                  <div class="device-status-row">
+                    <div class="status-dot ${dotClass}"></div>
+                    <span style="color:${dotClass==='online'?'var(--success)':dotClass==='busy'?'var(--accent)':'var(--error)'}">${d.status || 'Unknown'}</span>
+                  </div>
+                </div>`;
+            }).join('')}
+          </div>
+        `}`;
+    }
+
+    /* =====================================================
+     *  视图 3：测试报告
+     * ===================================================== */
+
+    /**
+     * 渲染测试报告视图
+     * @param {string} taskId - 任务 ID
+     */
+    async function renderReportView(taskId) {
+      const container = document.getElementById('viewContainer');
+      container.innerHTML = `<div class="spinner"></div>`;
+      try {
+        const [task, report] = await Promise.all([
+          api(`/api/v1/tests/${taskId}`),
+          api(`/api/v1/tests/${taskId}/report`).catch(() => null)
+        ]);
+        renderReportContent(task, report);
+      } catch {
+        container.innerHTML = `
+          <div class="empty-state">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--error)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            <p>无法加载报告数据</p>
+            <button class="btn btn-ghost" style="margin-top:12px" onclick="navigate('tasks')">返回任务列表</button>
+          </div>`;
+      }
+    }
+
+    /**
+     * 渲染测试报告实际内容
+     * @param {object} task - 任务基本信息
+     * @param {object|null} report - 报告详情数据
+     */
+    function renderReportContent(task, report) {
+      const container = document.getElementById('viewContainer');
+      const steps = (report && report.steps) || [];
+      const workflowPhases = ['Explore', 'Planner', 'Executor', 'Verifier', 'Reviewer'];
+      // 判断工作流当前阶段
+      let activePhase = -1;
+      if (report && report.summary) {
+        const summaryLower = (report.summary || '').toLowerCase();
+        workflowPhases.forEach((phase, i) => {
+          if (summaryLower.includes(phase.toLowerCase())) activePhase = Math.max(activePhase, i);
+        });
+      }
+      // 如果任务已完成，全部步骤高亮
+      const isComplete = ['completed','success','passed'].includes((task.status||'').toLowerCase());
+      if (isComplete) activePhase = workflowPhases.length - 1;
+
+      const tokenUsage = report && report.token_usage ? report.token_usage : null;
+
+      container.innerHTML = `
+        <div class="breadcrumb">
+          <a href="#tasks" onclick="navigate('tasks')">任务列表</a>
+          <span class="sep">›</span>
+          <a href="#tasks" onclick="navigate('tasks')">报告</a>
+          <span class="sep">›</span>
+          <span class="current" style="font-family:var(--font-mono);font-size:12px">${truncateId(task.task_id)}</span>
+        </div>
+
+        <div class="report-header-card">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
+            <h2 style="font-size:18px;font-weight:700">测试报告</h2>
+            <span class="badge badge-${statusClass(task.status)}">${task.status || 'pending'}</span>
+          </div>
+          <div class="report-meta">
+            <div class="report-meta-item">
+              <label>任务 ID</label>
+              <span>${task.task_id || '—'}</span>
+            </div>
+            <div class="report-meta-item">
+              <label>设备</label>
+              <span>${task.device_id || '—'}</span>
+            </div>
+            <div class="report-meta-item">
+              <label>创建时间</label>
+              <span>${formatTime(task.created_at)}</span>
+            </div>
+            <div class="report-meta-item">
+              <label>耗时</label>
+              <span>${report ? formatDuration(report.duration) : formatDuration(task.duration) || '—'}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="workflow-steps">
+          ${workflowPhases.map((phase, i) => {
+            const isDone = isComplete || i < activePhase;
+            const isActive = !isComplete && i === activePhase;
+            const cls = isDone ? 'completed' : isActive ? 'active' : '';
+            const connCls = (isDone && i < workflowPhases.length - 1) || (isComplete && i < workflowPhases.length - 1) ? 'done' : '';
+            return `
+              <div class="wf-step ${cls}">
+                <div class="wf-step-dot">${isDone ? '✓' : i+1}</div>
+                <div class="wf-step-label">${phase}</div>
+              </div>
+              ${i < workflowPhases.length - 1 ? `<div class="wf-connector ${connCls}"></div>` : ''}`;
+          }).join('')}
+        </div>
+
+        ${report && report.summary ? `
+          <div class="report-summary">${report.summary}</div>
+        ` : ''}
+
+        <div class="kpi-row" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+          <div class="kpi-card">
+            <div class="kpi-label">通过率</div>
+            <div class="kpi-value ${report && report.final_verdict && ['passed','success','completed'].includes(report.final_verdict.toLowerCase()) ? 'success' : 'error'}">${report && report.final_verdict ? (['passed','success','completed'].includes(report.final_verdict.toLowerCase()) ? 'PASS' : 'FAIL') : '—'}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">步骤数</div>
+            <div class="kpi-value total">${steps.length}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">总耗时</div>
+            <div class="kpi-value total" style="font-size:20px">${report ? formatDuration(report.duration) : '—'}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Token 用量</div>
+            <div class="kpi-value total" style="font-size:20px">${tokenUsage ? (typeof tokenUsage === 'object' ? (tokenUsage.total || tokenUsage.prompt_tokens || '—') : tokenUsage) : '—'}</div>
+          </div>
+        </div>
+
+        ${report && report.quality_metrics ? `
+          <div class="quality-grid">
+            ${Object.entries(report.quality_metrics).map(([k,v]) => `
+              <div class="quality-item">
+                <label>${k}</label>
+                <span style="color:${typeof v === 'number' && v >= 0.8 ? 'var(--success)' : 'var(--text-primary)'}">${typeof v === 'number' ? (v * 100).toFixed(1) + '%' : v}</span>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+
+        ${steps.length > 0 ? `
+          <h3 style="font-size:15px;font-weight:600;margin-bottom:12px">执行步骤</h3>
+          ${steps.map((step, i) => {
+            const stepStatus = (step.status || '').toLowerCase();
+            const badgeCls = stepStatus === 'passed' || stepStatus === 'success' ? 'completed' : stepStatus === 'failed' || stepStatus === 'error' ? 'failed' : stepStatus === 'running' ? 'running' : 'pending';
+            return `
+              <div class="step-card anim-row" style="animation-delay:${i*0.06}s" id="stepCard${i}">
+                <div class="step-card-header" onclick="toggleStep(${i})">
+                  <div class="step-card-left">
+                    <span class="step-num">${String(i+1).padStart(2,'0')}</span>
+                    <span class="step-action">${step.action || step.name || step.description || `步骤 ${i+1}`}</span>
+                  </div>
+                  <span class="step-status-badge badge-${badgeCls}">${step.status || 'unknown'}</span>
+                </div>
+                <div class="step-card-body">
+                  ${step.result ? `<div class="step-result">${step.result}</div>` : ''}
+                  ${step.screenshot ? `<div style="margin-top:8px"><img src="${step.screenshot}" alt="截图" style="max-width:100%;border-radius:4px;border:1px solid var(--border)" /></div>` : ''}
+                  ${step.expected ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted)"><strong>预期：</strong>${step.expected}</div>` : ''}
+                  ${step.duration ? `<div style="margin-top:4px;font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">耗时: ${formatDuration(step.duration)}</div>` : ''}
+                </div>
+              </div>`;
+          }).join('')}
+        ` : !report ? `
+          <div class="empty-state">
+            <div class="spinner"></div>
+            <p style="margin-top:12px">报告尚未生成，请稍候…</p>
+          </div>
+        ` : `
+          <div class="empty-state">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <p>暂无步骤数据</p>
+          </div>
+        `}
+
+        <div style="margin-top:24px;display:flex;gap:12px">
+          <a class="btn-download" href="${API_BASE.replace(/\/+$/,'')}/api/v1/tests/${task.task_id}/report/file?format=html" target="_blank">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            下载 HTML 报告
+          </a>
+        </div>`;
+    }
+
+    /**
+     * 展开/折叠步骤卡片
+     * @param {number} index - 步骤索引
+     */
+    function toggleStep(index) {
+      const card = document.getElementById(`stepCard${index}`);
+      if (card) card.classList.toggle('open');
+    }
+
+    /* =====================================================
+     *  模态框：新建测试任务
+     * ===================================================== */
+
+    /**
+     * 打开新建测试模态框
+     */
+    function openModal() {
+      const overlay = document.getElementById('modalOverlay');
+      overlay.classList.add('show');
+      // 加载设备选项
+      loadDeviceOptions();
+    }
+
+    /**
+     * 关闭模态框
+     */
+    function closeModal() {
+      document.getElementById('modalOverlay').classList.remove('show');
+      document.getElementById('formAppDesc').value = '';
+      document.getElementById('formDeviceId').value = '';
+      document.getElementById('formTimeout').value = '';
+    }
+
+    /**
+     * 点击模态框外部关闭
+     * @param {Event} event - 点击事件
+     */
+    function closeModalOutside(event) {
+      if (event.target === event.currentTarget) closeModal();
+    }
+
+    /**
+     * 加载设备列表到模态框下拉框
+     */
+    async function loadDeviceOptions() {
+      const select = document.getElementById('formDeviceId');
+      select.innerHTML = '<option value="">自动选择</option>';
+      try {
+        const devices = await api('/api/v1/devices');
+        cachedDevices = devices || [];
+        devices.forEach(d => {
+          const opt = document.createElement('option');
+          opt.value = d.device_id || d.udid || '';
+          opt.textContent = `${d.name || d.device_id} (${d.platform || 'Unknown'})`;
+          select.appendChild(opt);
+        });
+      } catch { /* 静默处理，保留默认选项 */ }
+    }
+
+    /**
+     * 提交新建测试任务
+     */
+    async function submitNewTest() {
+      const appDesc = document.getElementById('formAppDesc').value.trim();
+      if (!appDesc) {
+        showToast('请输入应用描述', 'error');
+        return;
+      }
+      const deviceId = document.getElementById('formDeviceId').value;
+      const timeout = document.getElementById('formTimeout').value;
+
+      const body = { app_description: appDesc };
+      if (deviceId) body.device_id = deviceId;
+      if (timeout) body.timeout = parseInt(timeout, 10);
+
+      const btn = document.getElementById('btnSubmitTest');
+      btn.disabled = true;
+      btn.textContent = '提交中…';
+
+      try {
+        const result = await api('/api/v1/tests/run', {
+          method: 'POST',
+          body: JSON.stringify(body)
+        });
+        showToast(`测试已创建: ${result.task_id || '成功'}`, 'success');
+        closeModal();
+        // 刷新任务列表
+        if (currentRoute === 'tasks') {
+          renderTasksView();
+        } else {
+          navigate('tasks');
+        }
+      } catch {
+        // api() 已处理 toast
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '启动测试';
+      }
+    }
+
+    /* =====================================================
+     *  API 基础地址配置
+     * ===================================================== */
+
+    /**
+     * 初始化 API 基础地址输入框
+     */
+    function initApiBaseInput() {
+      const input = document.getElementById('apiBaseInput');
+      input.value = API_BASE;
+      input.addEventListener('change', () => {
+        const val = input.value.trim().replace(/\/+$/, '');
+        if (val) {
+          API_BASE = val;
+          showToast(`API 地址已更新: ${API_BASE}`, 'info');
+          checkHealth();
+          router();
+        }
+      });
+    }
+
+    /* =====================================================
+     *  初始化
+     * ===================================================== */
+
+    /**
+     * 应用启动入口
+     */
+    function init() {
+      initApiBaseInput();
+      checkHealth();
+      healthTimer = setInterval(checkHealth, 15000);
+      window.addEventListener('hashchange', router);
+      // 初始路由
+      if (!window.location.hash) {
+        window.location.hash = 'tasks';
+      }
+      router();
+    }
+
+    // 启动应用
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>

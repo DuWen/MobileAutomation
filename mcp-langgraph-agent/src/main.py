@@ -14,6 +14,7 @@ from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from pydantic import BaseModel
 
@@ -399,10 +400,43 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 添加 CORS 中间件，允许 Dashboard 前端跨域访问
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # ------------------------------------------------------------
 # API 路由
 # ------------------------------------------------------------
+
+
+@app.get("/api/v1/tests")
+async def list_tests() -> dict[str, Any]:
+    """列出所有测试任务端点
+
+    返回所有测试任务的摘要列表，支持 Dashboard 前端展示任务总览。
+    """
+    tasks = []
+    for task_id, task in task_store.items():
+        tasks.append({
+            "task_id": task_id,
+            "status": task.get("status", "unknown"),
+            "app_description": task.get("app_description", ""),
+            "device_id": task.get("device_id"),
+            "created_at": task.get("created_at"),
+            "updated_at": task.get("updated_at"),
+            "duration": task.get("duration"),
+            "summary": task.get("summary"),
+            "final_verdict": task.get("final_verdict"),
+        })
+    # 按创建时间倒序排列
+    tasks.sort(key=lambda t: t.get("created_at", ""), reverse=True)
+    return {"total": len(tasks), "tasks": tasks}
 
 
 @app.get("/health")
