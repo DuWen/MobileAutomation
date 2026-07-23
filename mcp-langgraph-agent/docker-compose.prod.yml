@@ -1,11 +1,7 @@
-"""
-生产环境 Docker Compose 配置
-
-定义完整的生产环境服务栈，包含 MCP Server、LangGraph Agent、Appium、
-Nginx、Redis、PostgreSQL、Prometheus 和 Grafana，支持高可用和监控。
-"""
-
-version: "3.8"
+# 生产环境 Docker Compose 配置
+#
+# 定义完整的生产环境服务栈，包含 MCP Server、LangGraph Agent、Appium、
+# Nginx、Redis、PostgreSQL、Prometheus 和 Grafana，支持高可用和监控。
 
 services:
   # MCP 协议服务 - 提供移动端自动化测试工具调用

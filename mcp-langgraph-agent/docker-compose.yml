@@ -1,11 +1,7 @@
-"""
-本地开发环境 Docker Compose 配置
-
-定义 MCP Server、LangGraph Agent、Redis 和 PostgreSQL 服务，
-用于本地开发和调试移动端自动化测试系统。
-"""
-
-version: "3.8"
+# 本地开发环境 Docker Compose 配置
+#
+# 定义 MCP Server、LangGraph Agent、Redis 和 PostgreSQL 服务，
+# 用于本地开发和调试移动端自动化测试系统。
 
 services:
   # MCP 协议服务 - 提供移动端自动化测试工具调用
