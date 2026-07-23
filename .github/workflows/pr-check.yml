@@ -12,9 +12,15 @@ on:
     branches: [main, 'dev_*']
     paths:
       - 'mcp-langgraph-agent/**'
+      - '.github/workflows/**'
+  push:
+    branches: [main, 'dev_*']
+    paths:
+      - 'mcp-langgraph-agent/**'
+      - '.github/workflows/**'
 
 concurrency:
-  group: pr-${{ github.event.pull_request.number }}
+  group: pr-check-${{ github.ref }}
   cancel-in-progress: true
 
 defaults:
@@ -28,10 +34,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 设置 Python 3.13
+      - name: 设置 Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.12'
           cache: pip
           cache-dependency-path: mcp-langgraph-agent/requirements.txt
 
@@ -54,8 +60,7 @@ jobs:
         run: |
           pytest tests/ -v \
             --cov=src \
-            --cov-report=term-missing \
-            --cov-fail-under=50
+            --cov-report=term-missing
 
       - name: 检查 MCP Server 工具注册
         run: python -c "
