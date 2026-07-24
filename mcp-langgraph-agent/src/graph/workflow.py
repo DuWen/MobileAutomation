@@ -22,6 +22,9 @@ from src.graph.nodes.reviewer import reviewer_node
 
 logger = logging.getLogger(__name__)
 
+# 最大重试次数（对齐设计文档工作流拓扑）
+MAX_RETRIES = 3
+
 
 # ── 路由决策函数 ─────────────────────────────────────────────────
 
@@ -41,26 +44,25 @@ def route_after_verifier(state: AgentState) -> Literal["executor", "reviewer", "
     和 retry_count（失败时），此处只做路由判断。
 
     Args:
-        state: 当前 Agent 状态，包含 verification_passed、retry_count、
-               max_retries、current_step_index、test_steps 等字段。
+        state: 当前 Agent 状态，包含 verification_result、retry_count、
+               current_step_index、test_plan 等字段。
 
     Returns:
         Literal["executor", "reviewer", "__end__"]: 下一步的目标节点名称。
     """
-    verification_passed: bool = state.get("verification_passed", False)
+    verification_result: bool = state.get("verification_result", False)
     retry_count: int = state.get("retry_count", 0)
-    max_retries: int = state.get("max_retries", 3)
     current_step_index: int = state.get("current_step_index", 0)
-    total_steps: int = len(state.get("test_steps", []))
+    total_steps: int = len(state.get("test_plan", []))
 
     logger.info(
         f"[路由] verifier -> "
-        f"验证通过={verification_passed}, "
-        f"重试={retry_count}/{max_retries}, "
+        f"验证通过={verification_result}, "
+        f"重试={retry_count}/{MAX_RETRIES}, "
         f"步骤索引={current_step_index}/{total_steps}"
     )
 
-    if verification_passed:
+    if verification_result:
         # 验证通过：verifier 已将 current_step_index 递增
         # 检查是否还有下一步
         if current_step_index < total_steps:
@@ -71,11 +73,11 @@ def route_after_verifier(state: AgentState) -> Literal["executor", "reviewer", "
             return "reviewer"
     else:
         # 验证失败：检查是否可重试
-        if retry_count < max_retries:
-            logger.info(f"[路由] 下一步 -> executor (重试第 {retry_count}/{max_retries} 次)")
+        if retry_count < MAX_RETRIES:
+            logger.info(f"[路由] 下一步 -> executor (重试第 {retry_count}/{MAX_RETRIES} 次)")
             return "executor"
         else:
-            logger.warning(f"[路由] 结束 -> END (重试超限 {max_retries} 次)")
+            logger.warning(f"[路由] 结束 -> END (重试超限 {MAX_RETRIES} 次)")
             return END
 
 
@@ -87,7 +89,7 @@ def route_after_reviewer(state: AgentState) -> Literal["planner", "__end__"]:
     - rejected (审查未通过) → "planner"（驳回重新规划）
 
     Args:
-        state: 当前 Agent 状态，包含 reviewer_feedback、node_outputs 等字段。
+        state: 当前 Agent 状态，包含 final_report、node_outputs 等字段。
 
     Returns:
         Literal["planner", "__end__"]: 下一步的目标节点名称。

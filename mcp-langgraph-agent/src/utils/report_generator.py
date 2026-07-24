@@ -30,7 +30,7 @@ class ReportGenerator:
             task_id="abc-123",
             test_goal="测试登录功能",
             executed_steps=[...],
-            verification_details=[...],
+            verifier_output={...},
             reviewer_output={...},
             token_summary={...},
             duration=45.2,
@@ -52,7 +52,7 @@ class ReportGenerator:
         task_id: str,
         test_goal: str,
         executed_steps: List[Dict[str, Any]],
-        verification_details: List[Dict[str, Any]],
+        verifier_output: Dict[str, Any],
         reviewer_output: Dict[str, Any],
         token_summary: Dict[str, Any],
         duration: float,
@@ -68,7 +68,7 @@ class ReportGenerator:
             task_id: 任务 ID
             test_goal: 测试目标描述
             executed_steps: 已执行步骤列表
-            verification_details: 验证详情列表
+            verifier_output: 验证节点输出结果（含 passed、failure_reason 等）
             reviewer_output: 审查输出结果
             token_summary: Token 消耗统计
             duration: 测试总耗时（秒）
@@ -85,14 +85,14 @@ class ReportGenerator:
         if format == "html":
             content = self._generate_html(
                 task_id, test_goal, executed_steps,
-                verification_details, reviewer_output,
+                verifier_output, reviewer_output,
                 token_summary, duration, device_name, error,
             )
             filepath = self._output_dir / f"{filename}.html"
         elif format == "markdown":
             content = self._generate_markdown(
                 task_id, test_goal, executed_steps,
-                verification_details, reviewer_output,
+                verifier_output, reviewer_output,
                 token_summary, duration, device_name, error,
             )
             filepath = self._output_dir / f"{filename}.md"
@@ -108,7 +108,7 @@ class ReportGenerator:
         task_id: str,
         test_goal: str,
         executed_steps: List[Dict[str, Any]],
-        verification_details: List[Dict[str, Any]],
+        verifier_output: Dict[str, Any],
         reviewer_output: Dict[str, Any],
         token_summary: Dict[str, Any],
         duration: float,
@@ -121,7 +121,7 @@ class ReportGenerator:
             task_id: 任务 ID
             test_goal: 测试目标描述
             executed_steps: 已执行步骤列表
-            verification_details: 验证详情列表
+            verifier_output: 验证节点输出（含 passed、failure_reason 等）
             reviewer_output: 审查输出结果
             token_summary: Token 消耗统计
             duration: 测试总耗时
@@ -155,14 +155,21 @@ class ReportGenerator:
                 <td>{status_icon}</td>
             </tr>"""
 
-        # 验证详情表格行
+        # 验证详情
         verify_rows = ""
-        for v in verification_details:
-            status_icon = "✅" if v.get("passed") else "❌"
-            verify_rows += f"""
+        if verifier_output:
+            status_icon = "✅" if verifier_output.get("passed") else "❌"
+            verify_rows = f"""
             <tr>
-                <td>{v.get('check', '')}</td>
+                <td>验证结果</td>
                 <td>{status_icon}</td>
+            </tr>"""
+            failure_reason = verifier_output.get("failure_reason", "")
+            if failure_reason:
+                verify_rows += f"""
+            <tr>
+                <td>失败原因</td>
+                <td>{failure_reason}</td>
             </tr>"""
 
         html = f"""<!DOCTYPE html>
@@ -273,7 +280,7 @@ class ReportGenerator:
         task_id: str,
         test_goal: str,
         executed_steps: List[Dict[str, Any]],
-        verification_details: List[Dict[str, Any]],
+        verifier_output: Dict[str, Any],
         reviewer_output: Dict[str, Any],
         token_summary: Dict[str, Any],
         duration: float,
@@ -286,7 +293,7 @@ class ReportGenerator:
             task_id: 任务 ID
             test_goal: 测试目标描述
             executed_steps: 已执行步骤列表
-            verification_details: 验证详情列表
+            verifier_output: 验证节点输出（含 passed、failure_reason 等）
             reviewer_output: 审查输出结果
             token_summary: Token 消耗统计
             duration: 测试总耗时
@@ -336,9 +343,12 @@ class ReportGenerator:
             "|--------|------|",
         ])
 
-        for v in verification_details:
-            status = "✅" if v.get("passed") else "❌"
-            lines.append(f"| {v.get('check', '')} | {status} |")
+        if verifier_output:
+            status = "✅" if verifier_output.get("passed") else "❌"
+            lines.append(f"| 验证结果 | {status} |")
+            failure_reason = verifier_output.get("failure_reason", "")
+            if failure_reason:
+                lines.append(f"| 失败原因 | {failure_reason} |")
 
         if reviewer_output.get("feedback"):
             lines.extend(["", "## 审查反馈", "", reviewer_output["feedback"]])

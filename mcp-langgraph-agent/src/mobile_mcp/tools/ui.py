@@ -65,29 +65,37 @@ class UIToolkit:
     def _check_device(self, device_name: str) -> Optional[WebDriver]:
         """检查设备是否已连接并返回 WebDriver 实例。
 
+        使用 ensure_connected 替代直接 get_driver，当会话失效时自动重连。
+
         Args:
             device_name: 设备名称/标识符。
 
         Returns:
-            WebDriver 实例，设备未连接时返回 None。
+            WebDriver 实例，设备未连接且重连失败时返回 None。
         """
-        driver = self._device_manager.get_driver(device_name)
+        driver = self._device_manager.ensure_connected(device_name)
         if driver is None:
-            logger.warning("设备 '%s' 未连接", device_name)
+            logger.warning("设备 '%s' 未连接且重连失败", device_name)
         return driver
 
     def tap_element(
-        self, device_name: str, x: int, y: int
+        self,
+        device_name: str,
+        by: str,
+        value: str,
+        use_bounds_fallback: bool = True,
     ) -> Dict:
-        """在指定坐标位置执行点击操作。
+        """通过定位策略查找并点击元素。
 
-        通过坐标点（x, y）在设备屏幕上执行点击，适用于无法通过
-        元素定位器找到元素时的后备方案。
+        支持多种定位策略（id / xpath / accessibility_id / text），
+        找到元素后执行点击操作。当策略定位失败且 use_bounds_fallback
+        为 True 时，自动降级为从 UI 树解析 bounds 执行坐标点击。
 
         Args:
             device_name: 设备名称/标识符。
-            x: 点击位置的 x 坐标（像素）。
-            y: 点击位置的 y 坐标（像素）。
+            by: 定位方式 — "id" | "xpath" | "accessibility_id" | "text"。
+            value: 定位值。
+            use_bounds_fallback: 找不到元素时是否尝试用文本匹配 bounds 降级点击。
 
         Returns:
             Dict: 操作结果，包含 success 和 data 字段。
@@ -96,17 +104,82 @@ class UIToolkit:
         if driver is None:
             return {"success": False, "data": {"message": f"设备 '{device_name}' 未连接"}}
 
+        strategy_map = {
+            "id": AppiumBy.ID,
+            "xpath": AppiumBy.XPATH,
+            "accessibility_id": AppiumBy.ACCESSIBILITY_ID,
+            "text": AppiumBy.ANDROID_UIAUTOMATOR,
+        }
+
         try:
-            driver.execute_script("mobile: clickGesture", {"x": x, "y": y})
+            if by == "text":
+                # Android 特有：通过 UiSelector 按文本查找
+                selector = f'new UiSelector().textContains("{value}")'
+                element = driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
+            else:
+                strategy = strategy_map.get(by)
+                if strategy is None:
+                    return {
+                        "success": False,
+                        "data": {"message": f"不支持的定位方式: {by}", "by": by, "value": value},
+                    }
+                element = driver.find_element(strategy, value)
+            element.click()
             return {
                 "success": True,
-                "data": {"message": f"在坐标 ({x}, {y}) 执行点击成功", "x": x, "y": y},
+                "data": {"message": f"点击 [{by}={value}] 成功", "by": by, "value": value},
             }
-        except Exception as e:
-            logger.error("点击坐标 (%d, %d) 失败: %s", x, y, e)
+        except NoSuchElementException:
+            if use_bounds_fallback and by in ("text", "accessibility_id"):
+                return self._tap_by_bounds_fallback(driver, value)
             return {
                 "success": False,
-                "data": {"message": f"点击坐标 ({x}, {y}) 失败: {str(e)}", "x": x, "y": y, "error": str(e)},
+                "data": {"message": f"未找到元素 [{by}={value}]", "by": by, "value": value},
+            }
+        except Exception as e:
+            if use_bounds_fallback and by in ("text", "accessibility_id"):
+                return self._tap_by_bounds_fallback(driver, value)
+            logger.error("点击 [%s=%s] 失败: %s", by, value, e)
+            return {
+                "success": False,
+                "data": {"message": f"点击 [{by}={value}] 失败: {str(e)}", "by": by, "value": value},
+            }
+
+    def _tap_by_bounds_fallback(self, driver: WebDriver, text: str) -> Dict:
+        """通过文本在 UI 树中查找 bounds，执行坐标点击（降级方案）。
+
+        当策略定位失败时，从 page_source 的 XML 中解析包含目标文本的
+        元素 bounds 属性，计算中心坐标后执行坐标点击。
+
+        Args:
+            driver: Appium WebDriver 实例。
+            text: 要查找的文本内容。
+
+        Returns:
+            Dict: 操作结果。
+        """
+        import re
+
+        try:
+            xml = driver.page_source
+            pattern = rf'text="{re.escape(text)}"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"'
+            match = re.search(pattern, xml)
+            if match:
+                x1, y1, x2, y2 = map(int, match.groups())
+                cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                driver.tap([(cx, cy)])
+                return {
+                    "success": True,
+                    "data": {"message": f"通过坐标回退点击 [{text}] @ ({cx},{cy})", "x": cx, "y": cy},
+                }
+            return {
+                "success": False,
+                "data": {"message": f"文本 [{text}] 未在 UI 树中找到", "text": text},
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "data": {"message": f"坐标降级点击失败: {str(e)}", "text": text},
             }
 
     def tap_by_text(
@@ -149,16 +222,21 @@ class UIToolkit:
             }
 
     def input_text(
-        self, device_name: str, element_id: str, text: str
+        self,
+        device_name: str,
+        by: str,
+        value: str,
+        text: str,
     ) -> Dict:
         """向指定元素输入文本内容。
 
-        先清除元素的现有文本，再输入目标文本。
-        支持通过 accessibility_id、xpath 或 class_name 定位元素。
+        先通过定位策略找到元素，清除现有文本，再输入目标文本。
+        支持与 tap_element 相同的定位策略：id / xpath / accessibility_id / text。
 
         Args:
             device_name: 设备名称/标识符。
-            element_id: 元素标识符，可以是 accessibility_id、xpath 或 class_name。
+            by: 定位方式 — "id" | "xpath" | "accessibility_id" | "text"。
+            value: 定位值。
             text: 要输入的文本内容。
 
         Returns:
@@ -168,26 +246,47 @@ class UIToolkit:
         if driver is None:
             return {"success": False, "data": {"message": f"设备 '{device_name}' 未连接"}}
 
+        if not value:
+            return {"success": False, "data": {"message": "定位值 value 不能为空", "by": by}}
+
         try:
-            element = self._find_element(driver, element_id)
-            if element is None:
-                return {
-                    "success": False,
-                    "data": {"message": f"未找到元素 '{element_id}'", "element_id": element_id},
-                }
+            # 与 tap_element 相同的定位策略
+            strategy_map = {
+                "id": AppiumBy.ID,
+                "xpath": AppiumBy.XPATH,
+                "accessibility_id": AppiumBy.ACCESSIBILITY_ID,
+                "text": AppiumBy.ANDROID_UIAUTOMATOR,
+            }
+
+            if by == "text":
+                selector = f'new UiSelector().textContains("{value}")'
+                element = driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
+            else:
+                strategy = strategy_map.get(by)
+                if strategy is None:
+                    return {
+                        "success": False,
+                        "data": {"message": f"不支持的定位方式: {by}", "by": by, "value": value},
+                    }
+                element = driver.find_element(strategy, value)
 
             element.clear()
             element.send_keys(text)
 
             return {
                 "success": True,
-                "data": {"message": f"向元素 '{element_id}' 输入文本成功", "element_id": element_id, "text": text},
+                "data": {"message": f"向元素 [{by}={value}] 输入文本成功", "by": by, "value": value, "text": text},
             }
-        except Exception as e:
-            logger.error("向元素 '%s' 输入文本失败: %s", element_id, e)
+        except NoSuchElementException:
             return {
                 "success": False,
-                "data": {"message": f"向元素 '{element_id}' 输入文本失败: {str(e)}", "element_id": element_id, "text": text, "error": str(e)},
+                "data": {"message": f"未找到元素 [{by}={value}]", "by": by, "value": value},
+            }
+        except Exception as e:
+            logger.error("向元素 [%s=%s] 输入文本失败: %s", by, value, e)
+            return {
+                "success": False,
+                "data": {"message": f"向元素 [{by}={value}] 输入文本失败: {str(e)}", "by": by, "value": value, "error": str(e)},
             }
 
     def swipe(

@@ -52,11 +52,11 @@ async def reviewer_node(state: AgentState) -> Dict[str, Any]:
 
     Args:
         state: 当前 Agent 状态，包含 test_plan、executed_steps、
-               verification_details 等字段。
+               verification_result 等字段。
 
     Returns:
         dict: 包含以下字段的字典，用于更新 AgentState：
-            - reviewer_feedback: 审查反馈意见
+            - final_report: 审查生成的最终报告
             - node_outputs: 更新后的节点输出缓存（含 passed 字段）
             - messages: 新增的对话消息
             - total_tokens_used: 本轮消耗的 Token 数
@@ -69,10 +69,10 @@ async def reviewer_node(state: AgentState) -> Dict[str, Any]:
     # 调用 Agent 执行审查
     review_result: Dict[str, Any] = await agent.run(
         test_goal=state.get('test_goal', ''),
-        test_plan=state.get('test_plan', {}),
+        test_plan=state.get('test_plan', []),
         executed_steps=state.get('executed_steps', []),
-        verification_details=state.get('verification_details', []),
-        test_steps=state.get('test_steps', []),
+        verification_result=state.get('verification_result', False),
+        failure_reason=state.get('failure_reason', ''),
     )
 
     # 提取审查结论
@@ -86,7 +86,7 @@ async def reviewer_node(state: AgentState) -> Dict[str, Any]:
     logger.info(f"[Reviewer] 审查完成，结论: {'通过' if passed else '未通过'}")
 
     return {
-        'reviewer_feedback': feedback,
+        'final_report': feedback,
         'node_outputs': {
             **state.get('node_outputs', {}),
             'reviewer': {
@@ -101,7 +101,6 @@ async def reviewer_node(state: AgentState) -> Dict[str, Any]:
             },
         },
         'messages': [
-            *state.get('messages', []),
             {
                 'role': 'assistant',
                 'content': f"审查节点完成：{feedback}",

@@ -133,8 +133,42 @@ async def explorer_node(state: AgentState) -> Dict[str, Any]:
     ui_tree: str = state.get('ui_tree') or ''
     screenshot_b64: str = state.get('screenshot_b64') or ''
 
-    # 如果两者都缺失且设备名可用，尝试通过 HybridPerception 获取
-    if not ui_tree and not screenshot_b64 and device_name:
+    # 如果设备名可用，先尝试通过 MCP 连接设备（确保 Appium 会话已建立）
+    device_connected: bool = state.get('device_connected', False)
+    if device_name and not device_connected and _mcp_client:
+        try:
+            # 从设备池配置获取平台信息，而非 AgentState 中不存在的 device_platform 字段
+            device_platform: str = 'Android'  # 默认值
+            try:
+                from src.main import device_pool
+                for dev in device_pool:
+                    if dev.get('name') == device_name or dev.get('device_id') == device_name:
+                        device_platform = dev.get('platform', 'Android')
+                        break
+            except ImportError:
+                pass
+
+            connect_result = await _mcp_client.call_tool(
+                "connect_device",
+                {
+                    "platform": device_platform,
+                    "device_name": device_name,
+                },
+            )
+            if isinstance(connect_result, dict) and connect_result.get("success"):
+                logger.info(f"[Explorer] 设备 '{device_name}' 连接成功")
+                device_connected = True
+            else:
+                error_msg = (
+                    connect_result.get("data", {}).get("message", "未知错误")
+                    if isinstance(connect_result, dict) else str(connect_result)
+                )
+                logger.warning(f"[Explorer] 设备 '{device_name}' 连接失败: {error_msg}")
+        except Exception as e:
+            logger.warning(f"[Explorer] 设备连接异常: {e}")
+
+    # 如果两者都缺失且设备已连接，尝试通过 HybridPerception 获取
+    if not ui_tree and not screenshot_b64 and device_name and device_connected:
         try:
             perception = HybridPerception(mcp_client=_mcp_client)
             result = await perception.perceive(device_name, mode=perception_mode)
@@ -176,7 +210,6 @@ async def explorer_node(state: AgentState) -> Dict[str, Any]:
             'explorer': exploration_result,
         },
         'messages': [
-            *state.get('messages', []),
             {
                 'role': 'assistant',
                 'content': f"探索完成：{exploration_result.get('analysis', '')}",
@@ -185,6 +218,7 @@ async def explorer_node(state: AgentState) -> Dict[str, Any]:
         'total_tokens_used': state.get('total_tokens_used', 0) + tokens_used,
         'skill_context': skill_context,
         'matched_skills': [{'name': s.name, 'tags': s.tags} for s in matched_skills],
+        'device_connected': device_connected,
     }
 
     # 仅在有新感知数据时更新

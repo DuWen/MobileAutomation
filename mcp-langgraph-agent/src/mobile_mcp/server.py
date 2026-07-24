@@ -76,7 +76,7 @@ class MobileAutomationServer(FastMCP):
         """从 YAML 配置文件加载设备列表到 DeviceManager。
 
         解析设备配置文件，将设备注册到 DeviceManager 的预配置列表中，
-        方便后续快速连接。
+        方便后续快速连接。对齐设计文档的 devices.yaml 格式。
 
         Args:
             config_path: 设备配置文件路径（YAML 格式）。
@@ -88,13 +88,19 @@ class MobileAutomationServer(FastMCP):
                 data = yaml.safe_load(f)
             devices = data.get("devices", [])
             for dev in devices:
+                # 从 capabilities 子对象中提取 appPackage/appActivity
+                caps = dev.get("capabilities", {})
                 self._device_manager.register_device_config(
-                    device_id=dev.get("id", ""),
+                    device_id=dev.get("name", ""),
                     name=dev.get("name", ""),
                     platform=dev.get("platform", "Android"),
                     udid=dev.get("udid", ""),
-                    system_port=dev.get("systemPort", 8200),
-                    wda_port=dev.get("wdaPort", 8100),
+                    system_port=caps.get("systemPort", 8200),
+                    wda_port=caps.get("wdaPort", 8100),
+                    app_package=caps.get("appPackage", ""),
+                    app_activity=caps.get("appActivity", ""),
+                    appium_port=dev.get("appium_port", 4723),
+                    capabilities=caps,
                 )
             logger.info("从 %s 加载了 %d 台设备配置", config_path, len(devices))
         except FileNotFoundError:
@@ -112,24 +118,41 @@ class MobileAutomationServer(FastMCP):
 
         @self.tool(
             name="connect_device",
-            description="连接指定名称的设备，建立 Appium WebDriver 会话",
+            description="连接移动设备并启动指定 App，建立 Appium WebDriver 会话",
         )
-        def connect_device(device_name: str) -> Dict:
-            """连接指定名称的设备。
+        def connect_device(
+            platform: str,
+            device_name: str,
+            app_package: str = "",
+            app_activity: str = "",
+            appium_port: int = 4723,
+        ) -> Dict:
+            """连接移动设备并启动指定 App。
 
-            建立与移动设备的 Appium 连接，初始化 WebDriver 会话。
-            支持从预加载的设备配置中获取连接参数。
+            通过 Appium WebDriver 建立与设备的连接，初始化会话。
+            支持 Android 和 iOS 设备，参数缺失时自动从预配置补充。
 
             Args:
-                device_name: 设备名称/标识符（预配置的设备 ID 或 udid）。
+                platform: 平台类型，"Android" 或 "iOS"。
+                device_name: 设备名称或 UDID。
+                app_package: Android 包名 或 iOS bundle ID。
+                app_activity: Android 启动 Activity（iOS 可留空）。
+                appium_port: Appium Server 端口，默认 4723。
 
             Returns:
                 Dict: {"success": bool, "data": {...}} 格式的响应。
                     success 为 True 表示连接成功，data 包含设备信息。
             """
-            result = self._device_manager.connect_device(device_name)
+            result = self._device_manager.connect_device(
+                platform=platform,
+                device_name=device_name,
+                app_package=app_package,
+                app_activity=app_activity,
+                appium_port=appium_port,
+            )
             logger.info(
-                "connect_device(%s) => success=%s",
+                "connect_device(%s, %s) => success=%s",
+                platform,
                 device_name,
                 result.get("success"),
             )
@@ -196,20 +219,30 @@ class MobileAutomationServer(FastMCP):
 
         @self.tool(
             name="tap_element",
-            description="在设备屏幕指定坐标位置执行点击操作",
+            description="通过定位策略查找并点击元素，支持 id/xpath/accessibility_id/text 定位",
         )
-        def tap_element(device_name: str, x: int, y: int) -> Dict:
-            """在指定坐标位置执行点击操作。
+        def tap_element(
+            device_name: str,
+            by: str,
+            value: str,
+            use_bounds_fallback: bool = True,
+        ) -> Dict:
+            """通过定位策略查找并点击元素。
+
+            支持多种定位策略，找不到元素时可自动降级为坐标点击。
 
             Args:
                 device_name: 设备名称/标识符。
-                x: 点击位置的 x 坐标（像素）。
-                y: 点击位置的 y 坐标（像素）。
+                by: 定位方式 — "id" | "xpath" | "accessibility_id" | "text"。
+                value: 定位值。
+                use_bounds_fallback: 找不到元素时是否尝试用文本匹配 bounds 降级点击。
 
             Returns:
                 Dict: {"success": bool, "data": {...}} 格式的响应。
             """
-            return self._ui_toolkit.tap_element(device_name, x, y)
+            return self._ui_toolkit.tap_element(
+                device_name, by, value, use_bounds_fallback
+            )
 
         @self.tool(
             name="tap_by_text",
@@ -229,25 +262,27 @@ class MobileAutomationServer(FastMCP):
 
         @self.tool(
             name="input_text",
-            description="向指定元素输入文本内容，先清除再输入，敏感字段自动脱敏记录",
+            description="向指定元素输入文本内容，先清除再输入，支持 id/xpath/accessibility_id/text 定位，敏感字段自动脱敏记录",
         )
         def input_text(
-            device_name: str, element_id: str, text: str
+            device_name: str, by: str, value: str, text: str
         ) -> Dict:
             """向指定元素输入文本内容。
 
             输入操作会被记录，敏感信息（如密码）在日志和返回值中自动脱敏。
+            定位方式与 tap_element 一致：id / xpath / accessibility_id / text。
 
             Args:
                 device_name: 设备名称/标识符。
-                element_id: 元素标识符（accessibility_id / xpath / class_name）。
+                by: 定位方式 — "id" | "xpath" | "accessibility_id" | "text"。
+                value: 定位值。
                 text: 要输入的文本内容。
 
             Returns:
                 Dict: {"success": bool, "data": {...}} 格式的响应。
             """
             result = self._ui_toolkit.input_text(
-                device_name, element_id, text
+                device_name, by, value, text
             )
             # 对返回结果进行脱敏处理，防止敏感信息泄露
             return redact_dict(result)

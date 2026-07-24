@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from src.graph.state import AgentState
 from src.agents.planner import PlannerAgent
@@ -48,14 +48,15 @@ async def planner_node(state: AgentState) -> Dict[str, Any]:
     """规划节点的主函数。
 
     调用 PlannerAgent 生成结构化测试步骤计划。
+    test_plan 字段为 List[dict] 类型，使用 operator.add 合并，
+    因此返回的是步骤列表而非单个对象。
 
     Args:
         state: 当前 Agent 状态，包含 test_goal、node_outputs 等字段。
 
     Returns:
         dict: 包含以下字段的字典，用于更新 AgentState：
-            - test_plan: 生成的测试计划
-            - test_steps: 生成的测试步骤列表
+            - test_plan: 生成的测试步骤列表（List[dict]，对齐 AgentState 定义）
             - current_step_index: 重置为 0
             - retry_count: 重置为 0（新计划开始）
             - node_outputs: 更新后的节点输出缓存
@@ -83,9 +84,16 @@ async def planner_node(state: AgentState) -> Dict[str, Any]:
         exploration_result=explorer_output,
     )
 
-    # 提取测试计划和步骤
-    test_plan: dict = plan_result.get('test_plan', {})
-    test_steps: list = plan_result.get('test_steps', [])
+    # 提取测试步骤列表
+    # Agent 可能返回 test_steps 或 test_plan，统一转为 List[dict]
+    test_steps: List[dict] = plan_result.get('test_steps', [])
+    if not test_steps:
+        # 兼容 Agent 返回 test_plan 为 dict 包含 steps 的情况
+        plan_dict: dict = plan_result.get('test_plan', {})
+        if isinstance(plan_dict, dict):
+            test_steps = plan_dict.get('steps', [])
+        elif isinstance(plan_dict, list):
+            test_steps = plan_dict
 
     # 获取本轮 Token 消耗
     token_summary: Dict[str, Any] = agent.get_token_summary()
@@ -94,16 +102,17 @@ async def planner_node(state: AgentState) -> Dict[str, Any]:
     logger.info(f"[Planner] 规划完成，共 {len(test_steps)} 个步骤")
 
     return {
-        'test_plan': test_plan,
-        'test_steps': test_steps,
+        'test_plan': test_steps,
         'current_step_index': 0,
         'retry_count': 0,
         'node_outputs': {
             **state.get('node_outputs', {}),
-            'planner': test_plan,
+            'planner': {
+                'total_steps': len(test_steps),
+                'steps': test_steps,
+            },
         },
         'messages': [
-            *state.get('messages', []),
             {
                 'role': 'assistant',
                 'content': f"规划完成，生成 {len(test_steps)} 个测试步骤",

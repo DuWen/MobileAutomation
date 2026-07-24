@@ -2,12 +2,15 @@
 
 专门用于压缩 Appium 无障碍树 XML（Accessibility Tree），
 通过深度截断、属性过滤和冗余容器移除等策略，
-实现 95%+ 的 Token 压缩率。
+实现 95%+ 的 Token 压缩率。使用 xml.etree.ElementTree 进行可靠的 XML 解析。
 """
 
 import json
-import re
+import logging
+import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Set
+
+logger = logging.getLogger(__name__)
 
 
 # 需要保留的 XML 属性白名单
@@ -60,27 +63,6 @@ _INTERACTIVE_CONTAINERS: Set[str] = {
     'androidx.recyclerview.widget.RecyclerView',
     'android.support.v7.widget.RecyclerView',
 }
-
-
-def _extract_attributes(xml_tag: str) -> Dict[str, str]:
-    """从 XML 标签中提取属性。
-
-    解析单个 XML 标签字符串，提取所有属性键值对。
-
-    Args:
-        xml_tag: XML 标签字符串，如 '<node class="..." text="..." bounds="...">'
-
-    Returns:
-        属性名到属性值的字典
-    """
-    attrs: Dict[str, str] = {}
-    # 匹配属性名="属性值" 或 属性名='属性值'
-    pattern = re.compile(r'(\S+?)\s*=\s*"([^"]*)"')
-    for match in pattern.finditer(xml_tag):
-        key = match.group(1)
-        value = match.group(2)
-        attrs[key] = value
-    return attrs
 
 
 def _filter_attributes(attrs: Dict[str, str]) -> Dict[str, str]:
@@ -150,6 +132,8 @@ def _node_to_dict(
     """递归将 XML 节点转换为精简字典。
 
     递归遍历 XML 节点树，应用深度截断、属性过滤和冗余容器移除策略。
+    冗余容器判断使用原始子节点数（而非压缩后的），避免子节点被递归
+    移除后导致父容器误判为无子节点而整个子树丢失。
 
     Args:
         node: XML 节点字典（包含 tag, attrs, children 等字段）
@@ -169,11 +153,35 @@ def _node_to_dict(
     filtered_attrs = _filter_attributes(attrs)
     class_name = filtered_attrs.get('class', '')
 
-    # 处理子节点
-    children = node.get('children', [])
-    processed_children: List[Dict[str, Any]] = []
+    # 判断冗余时使用原始子节点数，防止子节点被递归移除后父容器误判
+    original_children = node.get('children', [])
+    if _is_redundant_container(class_name, filtered_attrs, len(original_children)):
+        # 冗余容器：跳过自身，直接递归处理子节点并提升
+        promoted: List[Dict[str, Any]] = []
+        for child in original_children[:max_children]:
+            child_result = _node_to_dict(
+                child,
+                current_depth,  # 深度不递增，因为当前节点被跳过
+                max_depth,
+                max_children,
+            )
+            if child_result is not None:
+                promoted.append(child_result)
 
-    for child in children[:max_children]:
+        if len(promoted) == 1:
+            return promoted[0]
+        elif len(promoted) > 1:
+            # 多个子节点无法合并提升，返回 None 让上层处理
+            # 但要确保子节点不丢失：包装到一个保留的容器中
+            return {
+                'class': class_name,
+                'children': promoted,
+            }
+        return None
+
+    # 非冗余容器：正常递归处理子节点
+    processed_children: List[Dict[str, Any]] = []
+    for child in original_children[:max_children]:
         child_result = _node_to_dict(
             child,
             current_depth + 1,
@@ -182,13 +190,6 @@ def _node_to_dict(
         )
         if child_result is not None:
             processed_children.append(child_result)
-
-    # 检查是否为冗余容器
-    if _is_redundant_container(class_name, filtered_attrs, len(processed_children)):
-        # 如果是冗余容器且有子节点，直接提升子节点
-        if len(processed_children) == 1:
-            return processed_children[0]
-        return None
 
     # 构建结果节点
     result: Dict[str, Any] = {
@@ -216,10 +217,10 @@ def _node_to_dict(
 
 
 def _parse_xml_to_tree(xml_str: str) -> Dict[str, Any] | None:
-    """简易解析 XML 为节点树。
+    """使用 xml.etree.ElementTree 解析 XML 为节点树。
 
-    使用正则表达式解析 XML 格式的节点树，不支持完整的 XML 解析，
-    但能满足 Appium 无障碍树 XML 的解析需求。
+    替代之前不可靠的正则解析方式，使用 Python 标准库的 XML 解析器
+    正确处理嵌套结构、自闭合标签和属性值转义。
 
     Args:
         xml_str: XML 字符串
@@ -227,52 +228,36 @@ def _parse_xml_to_tree(xml_str: str) -> Dict[str, Any] | None:
     Returns:
         节点树字典，解析失败返回 None
     """
-    # 移除 XML 声明和 DOCTYPE
-    xml_str = re.sub(r'<\?xml[^>]*\?>', '', xml_str)
-    xml_str = re.sub(r'<!DOCTYPE[^>]*>', '', xml_str)
-    xml_str = xml_str.strip()
+    try:
+        root_element = ET.fromstring(xml_str)
+    except ET.ParseError as e:
+        logger.error("[xml_compressor] XML 解析失败: %s", e)
+        return None
 
-    # 使用栈来解析嵌套节点
-    # 匹配 <node ...> 或 <node .../> 或 </node>
-    tag_pattern = re.compile(r'<(\w+)([^>]*?)(/?)>')
-    stack: List[Dict[str, Any]] = []
-    root: Dict[str, Any] | None = None
+    def _element_to_dict(element: ET.Element) -> Dict[str, Any]:
+        """递归将 ElementTree 元素转换为节点字典。
 
-    pos = 0
-    while pos < len(xml_str):
-        match = tag_pattern.search(xml_str, pos)
-        if not match:
-            break
+        Args:
+            element: ElementTree 元素对象
 
-        tag_name = match.group(1)
-        attrs_str = match.group(2).strip()
-        is_self_closing = match.group(3) == '/'
+        Returns:
+            包含 tag, attrs, children 的节点字典
+        """
+        # 将 Element 的 attrib 转换为普通字典
+        attrs: Dict[str, str] = dict(element.attrib)
 
-        attrs = _extract_attributes(attrs_str)
+        # 递归处理子元素
+        children: List[Dict[str, Any]] = []
+        for child in element:
+            children.append(_element_to_dict(child))
 
-        if is_self_closing:
-            # 自闭合标签
-            node: Dict[str, Any] = {'tag': tag_name, 'attrs': attrs, 'children': []}
-            if stack:
-                stack[-1]['children'].append(node)
-            elif root is None:
-                root = node
-        elif tag_name == 'node' or tag_name.startswith('node'):
-            # 开始标签
-            node = {'tag': tag_name, 'attrs': attrs, 'children': []}
-            if stack:
-                stack[-1]['children'].append(node)
-            elif root is None:
-                root = node
-            stack.append(node)
-        elif tag_name.startswith('/'):
-            # 结束标签
-            if stack:
-                stack.pop()
+        return {
+            'tag': element.tag,
+            'attrs': attrs,
+            'children': children,
+        }
 
-        pos = match.end()
-
-    return root
+    return _element_to_dict(root_element)
 
 
 def compress_xml(
@@ -293,16 +278,10 @@ def compress_xml(
 
     Returns:
         压缩后的 JSON 字符串
-
-    Example:
-        >>> compressed = compress_xml(original_xml, max_depth=6, max_children=15)
-        >>> len(compressed) < len(original_xml) // 20  # 95%+ 压缩率
-        True
     """
-    # 解析 XML 为节点树
+    # 使用 ElementTree 解析 XML
     tree = _parse_xml_to_tree(xml_str)
     if tree is None:
-        # 解析失败，返回空的 UI 树
         return json.dumps({'error': '无法解析 XML', 'compressed_tree': {}}, ensure_ascii=False)
 
     # 压缩节点树
@@ -314,21 +293,22 @@ def compress_xml(
     compressed_size = len(compressed_str.encode('utf-8'))
     compression_ratio = compressed_size / original_size if original_size > 0 else 1.0
 
-    # 统计元素数量
+    # 统计原始和压缩后的元素数量
     def _count_elements(node: Dict[str, Any]) -> int:
         count = 1
         for child in node.get('children', []):
             count += _count_elements(child)
         return count
 
-    element_count = _count_elements(compressed) if compressed else 0
+    original_element_count = _count_elements(tree) if tree else 0
+    compressed_element_count = _count_elements(compressed) if compressed else 0
 
     # 包装结果
     result = {
         'compressed_tree': compressed or {},
         'element_count': {
-            'original': 'unknown',  # 原始 XML 解析较复杂，暂不统计
-            'compressed': element_count,
+            'original': original_element_count,
+            'compressed': compressed_element_count,
         },
         'compression_ratio': round(compression_ratio, 4),
         'size': {

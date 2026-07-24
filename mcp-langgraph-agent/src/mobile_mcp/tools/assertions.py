@@ -44,15 +44,17 @@ class AssertToolkit:
     def _check_device(self, device_name: str) -> Optional[WebDriver]:
         """检查设备是否已连接并返回 WebDriver 实例。
 
+        使用 ensure_connected 替代直接 get_driver，当会话失效时自动重连。
+
         Args:
             device_name: 设备名称/标识符。
 
         Returns:
-            WebDriver 实例，设备未连接时返回 None。
+            WebDriver 实例，设备未连接且重连失败时返回 None。
         """
-        driver = self._device_manager.get_driver(device_name)
+        driver = self._device_manager.ensure_connected(device_name)
         if driver is None:
-            logger.warning("设备 '%s' 未连接", device_name)
+            logger.warning("设备 '%s' 未连接且重连失败", device_name)
         return driver
 
     def assert_text_visible(

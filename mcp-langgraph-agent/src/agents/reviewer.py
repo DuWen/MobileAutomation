@@ -55,21 +55,21 @@ class ReviewerAgent(BaseAgent):
         Args:
             **kwargs: 包含以下参数：
                 - test_goal: 原始测试目标
-                - test_plan: 测试计划
+                - test_plan: 测试步骤计划列表
                 - executed_steps: 已执行的步骤列表
-                - verification_details: 验证详情列表
-                - test_steps: 测试步骤列表
+                - verification_result: 最新验证结果（布尔值）
+                - failure_reason: 最新验证失败原因
 
         Returns:
             审查结果字典，包含 passed, feedback, summary 等字段
         """
         test_goal: str = kwargs.get('test_goal', '')
-        test_plan: dict = kwargs.get('test_plan', {})  # noqa: F841 - 保留以备后续使用
+        test_plan: list = kwargs.get('test_plan', [])
         executed_steps: list = kwargs.get('executed_steps', [])
-        verification_details: list = kwargs.get('verification_details', [])
-        test_steps: list = kwargs.get('test_steps', [])
+        verification_result: bool = kwargs.get('verification_result', False)
+        failure_reason: str = kwargs.get('failure_reason', '')
 
-        total_steps: int = len(test_steps)
+        total_steps: int = len(test_plan)
         completed_steps: int = len(executed_steps)
 
         # 构建执行日志摘要
@@ -77,7 +77,10 @@ class ReviewerAgent(BaseAgent):
             f"步骤数: {completed_steps}/{total_steps}, "
             f"执行记录: {executed_steps}"
         )
-        verification_result: str = str(verification_details)
+        verification_info: str = (
+            f"验证通过: {verification_result}"
+            + (f", 失败原因: {failure_reason}" if failure_reason else "")
+        )
 
         # 构建 LLM 消息序列
         messages = [
@@ -86,7 +89,7 @@ class ReviewerAgent(BaseAgent):
                 'content': REVIEWER_PROMPT.format(
                     test_goal=test_goal,
                     execution_log=execution_log,
-                    verification_result=verification_result,
+                    verification_result=verification_info,
                 ),
             },
             {
@@ -106,7 +109,7 @@ class ReviewerAgent(BaseAgent):
         review_result: Dict[str, Any] = self._parse_json_response(
             response,
             fallback=self._generate_fallback_review(
-                test_goal, total_steps, completed_steps, verification_details
+                test_goal, total_steps, completed_steps, executed_steps
             ),
         )
 
@@ -117,7 +120,7 @@ class ReviewerAgent(BaseAgent):
 
         # 计算质量指标
         quality_metrics: Dict[str, Any] = self._calculate_quality_metrics(
-            executed_steps, verification_details, total_steps
+            executed_steps, total_steps
         )
 
         logger.info(
@@ -139,16 +142,14 @@ class ReviewerAgent(BaseAgent):
     def _calculate_quality_metrics(
         self,
         executed_steps: list,
-        verification_details: list,
         total_steps: int,
     ) -> Dict[str, Any]:
         """计算测试质量指标。
 
-        综合执行和验证数据，计算成功率、通过率等指标。
+        综合执行数据，计算成功率、通过率等指标。
 
         Args:
             executed_steps: 已执行的步骤列表
-            verification_details: 验证详情列表
             total_steps: 总步骤数
 
         Returns:
@@ -158,27 +159,16 @@ class ReviewerAgent(BaseAgent):
         failed_steps = sum(1 for s in executed_steps if not s.get('passed', True))
         passed_steps = completed_steps - failed_steps
 
-        # 计算验证通过率
-        passed_verifications = sum(
-            1 for d in verification_details if d.get('passed', False)
-        )
-        total_verifications = len(verification_details)
-
         execution_success_rate: float = (
             passed_steps / completed_steps if completed_steps > 0 else 0.0
-        )
-        verification_pass_rate: float = (
-            passed_verifications / total_verifications if total_verifications > 0 else 0.0
         )
 
         return {
             'execution_success_rate': round(execution_success_rate, 4),
-            'verification_pass_rate': round(verification_pass_rate, 4),
             'total_steps': total_steps,
             'completed_steps': completed_steps,
             'failed_steps': failed_steps,
-            'passed_verifications': passed_verifications,
-            'total_verifications': total_verifications,
+            'passed_steps': passed_steps,
         }
 
     def _generate_fallback_review(
@@ -186,36 +176,36 @@ class ReviewerAgent(BaseAgent):
         test_goal: str,
         total_steps: int,
         completed_steps: int,
-        verification_details: list,
+        executed_steps: list,
     ) -> Dict[str, Any]:
         """生成 fallback 审查结果。
 
-        当 LLM 返回无法解析时使用，基于执行和验证数据直接判断。
+        当 LLM 返回无法解析时使用，基于执行数据直接判断。
 
         Args:
             test_goal: 测试目标
             total_steps: 总步骤数
             completed_steps: 已完成步骤数
-            verification_details: 验证详情列表
+            executed_steps: 已执行步骤列表
 
         Returns:
             默认审查结果字典
         """
         all_steps_executed: bool = completed_steps >= total_steps
-        all_verifications_passed: bool = all(
-            d.get('passed', False) for d in verification_details
-        ) if verification_details else False
+        all_passed: bool = all(
+            s.get('passed', False) for s in executed_steps
+        ) if executed_steps else False
 
-        if all_steps_executed and all_verifications_passed:
+        if all_steps_executed and all_passed:
             overall_assessment = 'passed'
             feedback = (
                 f"审查通过。所有 {total_steps} 个步骤已执行完毕，验证全部通过。"
             )
             final_verdict = 'pass'
-        elif all_steps_executed and not all_verifications_passed:
+        elif all_steps_executed and not all_passed:
             overall_assessment = 'partial'
             feedback = (
-                "部分通过。所有步骤已执行，但部分验证项未通过。"
+                "部分通过。所有步骤已执行，但部分步骤未通过。"
             )
             final_verdict = 'need_manual_check'
         else:

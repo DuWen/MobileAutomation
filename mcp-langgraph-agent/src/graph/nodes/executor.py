@@ -61,7 +61,7 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
     - 验证失败后重试，current_step_index 不变，retry_count 由 verifier 递增
 
     Args:
-        state: 当前 Agent 状态，包含 test_steps、current_step_index、
+        state: 当前 Agent 状态，包含 test_plan、current_step_index、
                ui_tree、screenshot_b64 等字段。
 
     Returns:
@@ -70,27 +70,32 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
             - node_outputs: 更新后的节点输出缓存
             - messages: 新增的对话消息
             - total_tokens_used: 本轮消耗的 Token 数
-            - error: 执行出错时填充的错误信息
+            - failure_reason: 执行出错时填充的错误信息
     """
     current_step_index: int = state.get('current_step_index', 0)
-    test_steps: List[str] = state.get('test_steps', [])
+    test_plan: List = state.get('test_plan', [])
 
     # 边界检查
-    if current_step_index >= len(test_steps):
+    if current_step_index >= len(test_plan):
         logger.warning(
-            f"[Executor] 步骤索引 {current_step_index} 超出范围，总步骤数 {len(test_steps)}"
+            f"[Executor] 步骤索引 {current_step_index} 超出范围，总步骤数 {len(test_plan)}"
         )
         return {
-            'error': f"步骤索引 {current_step_index} 超出范围",
+            'failure_reason': f"步骤索引 {current_step_index} 超出范围",
             'node_outputs': {
                 **state.get('node_outputs', {}),
                 'executor': {'error': '索引越界'},
             },
         }
 
-    current_step: str = test_steps[current_step_index]
+    # 获取当前步骤（兼容 str 和 dict 两种格式）
+    step_item = test_plan[current_step_index]
+    if isinstance(step_item, dict):
+        step_desc: str = step_item.get('action', '') or step_item.get('step', str(step_item))
+    else:
+        step_desc = str(step_item)
     logger.info(
-        f"[Executor] 开始执行步骤 [{current_step_index + 1}/{len(test_steps)}]: {current_step}"
+        f"[Executor] 开始执行步骤 [{current_step_index + 1}/{len(test_plan)}]: {step_desc}"
     )
 
     # 获取 Agent 实例
@@ -103,12 +108,13 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
 
     # 调用 Agent 执行步骤
     execution_record: Dict[str, Any] = await agent.run(
-        current_step=current_step,
+        current_step=step_desc,
         current_step_index=current_step_index,
         ui_tree=state.get('ui_tree', ''),
         screenshot_b64=state.get('screenshot_b64', ''),
-        test_plan=state.get('test_plan', {}),
+        test_plan=test_plan,
         executed_steps=state.get('executed_steps', []),
+        device_name=state.get('device_name', ''),
     )
 
     # 获取本轮 Token 消耗
@@ -116,7 +122,7 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
     tokens_used: int = token_summary.get('total_tokens', 0)
 
     logger.info(
-        f"[Executor] 步骤 [{current_step_index + 1}/{len(test_steps)}] 执行完成，"
+        f"[Executor] 步骤 [{current_step_index + 1}/{len(test_plan)}] 执行完成，"
         f"结果: {execution_record.get('result', '未知')}"
     )
 
@@ -127,7 +133,6 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
             'executor': execution_record,
         },
         'messages': [
-            *state.get('messages', []),
             {
                 'role': 'assistant',
                 'content': (

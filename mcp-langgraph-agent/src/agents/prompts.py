@@ -123,15 +123,76 @@ EXECUTOR_PROMPT = """## 任务目标
 ## 历史操作记录
 {history}
 
+## 可用 MCP 工具列表
+以下工具可通过 tool_actions 字段调用：
+
+1. **tap_element** — 点击元素
+   参数: device_name, by("id"|"xpath"|"accessibility_id"|"text"), value(定位值), use_bounds_fallback(可选,默认true)
+
+2. **input_text** — 向元素输入文本
+   参数: device_name, by("id"|"xpath"|"accessibility_id"|"text"), value(定位值), text(要输入的文本)
+
+3. **swipe** — 滑动操作
+   参数: device_name, start_x, start_y, end_x, end_y, duration(可选,默认500)
+
+4. **take_screenshot** — 截取当前屏幕
+   参数: device_name
+
+5. **assert_text_visible** — 断言文本可见
+   参数: device_name, expected_text, timeout(可选,默认10)
+
+## 定位策略说明
+- **id**: 使用 resource-id，如 "com.example:id/et_account"
+- **xpath**: 使用 XPath 表达式
+- **accessibility_id**: 使用 content-description
+- **text**: 使用元素显示的文本内容
+
+**重要**: 优先使用 id 定位（最精确），text 定位作为备选。
+
 ## 输出要求
 请以 JSON 格式输出执行结果，包含以下字段：
 - `step_executed`: 已执行的步骤编号
 - `action_performed`: 执行的操作类型和参数
+- `tool_actions`: **(必填)** 需要调用的 MCP 工具列表，每个元素包含：
+  - `tool`: 工具名称（必须与上方工具列表一致）
+  - `params`: 工具参数字典（不需要填 device_name，系统会自动注入）
 - `status`: 执行状态（success/failure/retry/blocked）
 - `screenshot_taken`: 是否已截图保存现场
 - `ui_changes`: 界面变化描述
 - `error_info`: 如果执行失败，提供错误信息和建议
 - `next_action`: 下一步建议（continue/retry/verify/abort）
+
+## tool_actions 示例
+对于步骤 "输入 admin1 到账号输入框 (resource-id: com.zhongfu.emapp.debug:id/et_account)":
+```json
+{{
+  "tool_actions": [
+    {{
+      "tool": "input_text",
+      "params": {{
+        "by": "id",
+        "value": "com.zhongfu.emapp.debug:id/et_account",
+        "text": "admin1"
+      }}
+    }}
+  ]
+}}
+```
+
+对于步骤 "点击登录按钮 (text: 登录)":
+```json
+{{
+  "tool_actions": [
+    {{
+      "tool": "tap_element",
+      "params": {{
+        "by": "text",
+        "value": "登录"
+      }}
+    }}
+  ]
+}}
+```
 """
 
 

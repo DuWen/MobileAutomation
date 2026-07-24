@@ -94,7 +94,9 @@ class HybridPerception:
     """
 
     # UI 树元素数量阈值：低于此值认为信息不足
-    MIN_UI_TREE_ELEMENTS: int = 3
+    # 注意：压缩后的 UI 树已移除冗余容器，实际保留的都是交互元素
+    # 空桌面可能只有1-2个元素，正常App页面通常3个以上
+    MIN_UI_TREE_ELEMENTS: int = 2
     # 截图最大宽度
     SCREENSHOT_MAX_WIDTH: int = 1080
     # 截图压缩质量
@@ -261,7 +263,9 @@ class HybridPerception:
     def _is_ui_tree_sufficient(self, ui_tree: str) -> bool:
         """检查 UI 树信息是否足够用于分析。
 
-        通过简单的元素计数判断 UI 树是否包含足够的交互信息。
+        通过元素计数判断 UI 树是否包含足够的交互信息。
+        压缩后的 UI 树已移除冗余容器，只保留交互元素，
+        因此阈值较低。空 compressed_tree 或元素过少均视为不足。
 
         Args:
             ui_tree: UI 树 JSON 字符串
@@ -270,6 +274,7 @@ class HybridPerception:
             UI 树信息是否足够
         """
         if not ui_tree:
+            logger.warning("[HybridPerception] UI 树为空字符串")
             return False
 
         try:
@@ -277,17 +282,47 @@ class HybridPerception:
             data = json.loads(ui_tree)
             compressed_tree = data.get("compressed_tree", {})
 
+            # 空字典视为无有效元素
+            if not compressed_tree:
+                logger.warning("[HybridPerception] compressed_tree 为空，可能 App 未启动或页面无交互元素")
+                return False
+
             # 递归计算元素数量
             def count_elements(node: dict) -> int:
+                if not node:
+                    return 0
                 count = 1
                 for child in node.get("children", []):
                     count += count_elements(child)
                 return count
 
-            element_count = count_elements(compressed_tree) if compressed_tree else 0
-            return element_count >= self.MIN_UI_TREE_ELEMENTS
+            element_count = count_elements(compressed_tree)
 
-        except (json.JSONDecodeError, AttributeError):
+            # 检查是否有实际的交互属性（clickable/text/content-desc 等）
+            has_interactive = False
+            for key in ('clickable', 'text', 'content-desc', 'resource-id'):
+                val = compressed_tree.get(key)
+                if val and val not in ('', 'false', False):
+                    has_interactive = True
+                    break
+
+            is_sufficient = element_count >= self.MIN_UI_TREE_ELEMENTS or has_interactive
+
+            if not is_sufficient:
+                logger.warning(
+                    "[HybridPerception] UI 树元素不足: element_count=%d, has_interactive=%s, "
+                    "可能需要降级到截图",
+                    element_count, has_interactive,
+                )
+            else:
+                logger.info(
+                    "[HybridPerception] UI 树元素充足: element_count=%d", element_count
+                )
+
+            return is_sufficient
+
+        except (json.JSONDecodeError, AttributeError) as e:
+            logger.warning("[HybridPerception] UI 树 JSON 解析失败: %s", e)
             return False
 
     def estimate_token_savings(self, result: PerceptionResult) -> Dict[str, Any]:

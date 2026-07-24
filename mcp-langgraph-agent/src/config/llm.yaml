@@ -1,0 +1,24 @@
+# LLM 模型配置文件
+# 定义 LLM 提供商、模型选择和路由规则。
+# 对齐架构设计文档格式。
+
+llm:
+  provider: "openai"           # openai | anthropic | ollama
+  default_model: "gpt-4o"
+  fallback_model: "gpt-4o-mini"
+  temperature: 0.2
+  max_tokens: 4096
+
+  # 模型路由规则：匹配 pattern 的任务使用指定模型
+  routing:
+    - pattern: "简单.*(点击|返回|输入)"
+      model: "gpt-4o-mini"
+    - pattern: "分析|判断|异常"
+      model: "gpt-4o"
+
+mcp:
+  transport: "stdio"           # stdio | streamable_http
+  servers:
+    appium:
+      command: "python"
+      args: ["-m", "src.mobile_mcp.server"]

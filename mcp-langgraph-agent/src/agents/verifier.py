@@ -57,21 +57,27 @@ class VerifierAgent(BaseAgent):
                 - execution_record: 上一步的执行记录
                 - ui_tree: 当前界面 UI 树
                 - screenshot_b64: 当前界面截图 Base64
-                - test_plan: 测试计划（含预期结果）
-                - verification_points: 验证点列表
+                - test_plan: 测试步骤计划列表
 
         Returns:
-            验证结果字典，包含 verification_passed, verification_details 等字段
+            验证结果字典，包含 verification_passed, failure_reason 等字段
         """
         execution_record: dict = kwargs.get('execution_record', {})
         ui_tree: str = kwargs.get('ui_tree', '')
         screenshot_b64: str = kwargs.get('screenshot_b64', '')
-        test_plan: dict = kwargs.get('test_plan', {})
-        verification_points: list = kwargs.get('verification_points', [])
+        test_plan: list = kwargs.get('test_plan', [])
 
-        # 如果没有提供验证点，从测试计划中提取
-        if not verification_points and test_plan:
-            verification_points = test_plan.get('expected_results', [])
+        # 从测试计划中提取验证点（兼容 str 和 dict 两种步骤格式）
+        verification_points: list = []
+        if test_plan:
+            for step in test_plan:
+                if isinstance(step, dict):
+                    expected = step.get('expected', step.get('expected_result', ''))
+                    if expected:
+                        verification_points.append(expected)
+                elif isinstance(step, str):
+                    # 字符串步骤无法提取预期结果，跳过
+                    pass
 
         # 构建 LLM 消息序列
         messages = [
@@ -115,6 +121,14 @@ class VerifierAgent(BaseAgent):
         overall_status: str = verify_result.get('overall_status', 'partial')
         verification_passed: bool = overall_status == 'passed'
 
+        # 生成失败原因（验证不通过时）
+        failure_reason: str = ''
+        if not verification_passed:
+            failure_reason = verify_result.get('summary', '')
+            if not failure_reason and verification_details:
+                failed_items = [d.get('check', '') for d in verification_details if not d.get('passed', False)]
+                failure_reason = f"验证未通过: {', '.join(failed_items)}" if failed_items else '验证未通过'
+
         logger.info(
             f"[VerifierAgent] 验证完成，结果: {overall_status}，"
             f"详情数: {len(verification_details)}"
@@ -122,7 +136,7 @@ class VerifierAgent(BaseAgent):
 
         return {
             'verification_passed': verification_passed,
-            'verification_details': verification_details,
+            'failure_reason': failure_reason,
             'overall_status': overall_status,
             'summary': verify_result.get('summary', ''),
             'suggestions': verify_result.get('suggestions', []),

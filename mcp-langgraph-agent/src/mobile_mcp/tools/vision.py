@@ -8,6 +8,8 @@
 
 import base64
 import logging
+import os
+import time
 from typing import Dict
 
 
@@ -43,22 +45,63 @@ class VisionToolkit:
     def _check_device(self, device_name: str):
         """检查设备是否已连接并返回 WebDriver 实例。
 
+        使用 ensure_connected 替代直接 get_driver，当会话失效时自动重连。
+
         Args:
             device_name: 设备名称/标识符。
 
         Returns:
-            WebDriver 实例，设备未连接时返回 None。
+            WebDriver 实例，设备未连接且重连失败时返回 None。
         """
-        driver = self._device_manager.get_driver(device_name)
+        driver = self._device_manager.ensure_connected(device_name)
         if driver is None:
-            logger.warning("设备 '%s' 未连接", device_name)
+            logger.warning("设备 '%s' 未连接且重连失败", device_name)
         return driver
 
+    def _save_screenshot_to_file(self, screenshot_base64: str, device_name: str) -> str:
+        """将截图 base64 数据解码后保存为本地 JPEG 文件。
+
+        基于项目根目录创建 screenshots/ 目录，文件名格式为
+        {device_name}_{timestamp}.jpg。
+
+        Args:
+            screenshot_base64: base64 编码的截图数据。
+            device_name: 设备名称，用于构造文件名。
+
+        Returns:
+            保存的截图文件绝对路径；保存失败时返回空字符串。
+        """
+        try:
+            # 基于当前文件位置推导项目根目录（与 device.py 中 APPIUM_HOME 推导方式一致）
+            this_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.dirname(this_dir)))
+            )
+            screenshots_dir = os.path.join(project_root, "screenshots")
+            os.makedirs(screenshots_dir, exist_ok=True)
+
+            # 构造文件名: {device_name}_{timestamp}.jpg
+            timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+            safe_device_name = device_name.replace(" ", "_").replace("/", "_")
+            filename = f"{safe_device_name}_{timestamp}.jpg"
+            file_path = os.path.join(screenshots_dir, filename)
+
+            # 解码 base64 并写入文件
+            image_data = base64.b64decode(screenshot_base64)
+            with open(file_path, "wb") as f:
+                f.write(image_data)
+
+            logger.info("截图已保存到本地文件: %s", file_path)
+            return file_path
+        except Exception as e:
+            logger.error("截图保存到本地文件失败: %s", e)
+            return ""
+
     def take_screenshot(self, device_name: str) -> Dict:
-        """获取设备当前屏幕截图。
+        """获取设备当前屏幕截图，并保存到本地文件。
 
         通过 Appium WebDriver 截取设备屏幕，返回 base64 编码的图片数据。
-        截图会自动进行压缩处理以减小传输大小。
+        截图会自动进行压缩处理以减小传输大小，同时保存到本地 screenshots/ 目录。
 
         Args:
             device_name: 设备名称/标识符。
@@ -70,6 +113,7 @@ class VisionToolkit:
                 - data.format: 图片格式（如 "jpeg"）
                 - data.original_size: 原始图片大小（字节）
                 - data.compressed_size: 压缩后大小（字节）
+                - data.file_path: 截图保存的本地文件路径
         """
         driver = self._check_device(device_name)
         if driver is None:
@@ -89,6 +133,9 @@ class VisionToolkit:
             original_size = len(base64.b64decode(screenshot_base64))
             compressed_size = len(base64.b64decode(compressed_base64))
 
+            # 将截图保存到本地文件
+            file_path = self._save_screenshot_to_file(compressed_base64, device_name)
+
             return {
                 "success": True,
                 "data": {
@@ -98,6 +145,7 @@ class VisionToolkit:
                     "compressed_size": compressed_size,
                     "compression_ratio": round(compressed_size / original_size, 4) if original_size > 0 else 0,
                     "device_name": device_name,
+                    "file_path": file_path,
                 },
             }
         except Exception as e:

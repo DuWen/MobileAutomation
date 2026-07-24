@@ -134,9 +134,9 @@ def _determine_node_status(node_name: str, node_output: dict[str, Any]) -> str:
 
     各节点的成功/失败判断逻辑：
     - explorer: 无 error 字段即为成功
-    - planner: 生成了 test_steps 且无 error 即为成功
+    - planner: 生成了 test_plan 且非空即为成功
     - executor: 无 error 字段即为成功
-    - verifier: verification_passed 为 True 时成功，False 时失败
+    - verifier: verification_result 为 True 时成功，False 时失败
     - reviewer: node_outputs.reviewer.passed 为 True 时成功，False 时失败
 
     Args:
@@ -154,8 +154,8 @@ def _determine_node_status(node_name: str, node_output: dict[str, Any]) -> str:
         return 'failed'
 
     if node_name == 'verifier':
-        # verifier 的核心判断：verification_passed
-        passed = node_output.get('verification_passed')
+        # verifier 的核心判断：verification_result（对齐 AgentState 字段名）
+        passed = node_output.get('verification_result')
         if passed is True:
             return 'success'
         elif passed is False:
@@ -176,8 +176,8 @@ def _determine_node_status(node_name: str, node_output: dict[str, Any]) -> str:
         return 'completed'
 
     elif node_name == 'planner':
-        # planner 有 test_steps 且非空即为成功
-        steps = node_output.get('test_steps', [])
+        # planner 有 test_plan 且非空即为成功
+        steps = node_output.get('test_plan', [])
         if steps:
             return 'success'
         return 'completed'
@@ -225,24 +225,26 @@ async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
         # 获取编译后的工作流
         app = get_compiled_graph()
 
-        # 构建初始状态
+        # 构建初始状态（对齐 AgentState 定义）
         initial_state: dict[str, Any] = {
+            'messages': [],
             'test_goal': request.app_description,
-            'test_steps': [],
-            'current_step_index': 0,
-            'executed_steps': [],
+            'current_screen': '',
             'ui_tree': None,
             'screenshot_b64': None,
-            'device_name': request.device_id or 'default',
-            'test_plan': None,
-            'verification_passed': False,
-            'verification_details': [],
+            'test_plan': [],
+            'executed_steps': [],
+            'current_step_index': 0,
+            'verification_result': False,
+            'failure_reason': '',
             'retry_count': 0,
-            'max_retries': 3,
-            'error': None,
-            'messages': [],
+            'device_name': request.device_id or 'Pixel_7_API_34',
+            'device_connected': False,
+            'final_report': '',
             'node_outputs': {},
-            'reviewer_feedback': None,
+            'perception_mode': 'hybrid',
+            'matched_skills': None,
+            'skill_context': None,
             'total_tokens_used': 0,
             'metadata': {
                 'task_id': task_id,
@@ -273,9 +275,9 @@ async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
                 }
                 # 安全提取输出摘要（避免大对象导致日志过大）
                 if isinstance(node_output, dict):
-                    for key in ('next_action', 'analysis', 'test_plan', 'verification_passed',
-                                'final_verdict', 'feedback', 'total_tokens_used', 'error',
-                                'retry_count', 'current_step_index', 'reviewer_feedback'):
+                    for key in ('next_action', 'analysis', 'test_plan', 'verification_result',
+                                'final_verdict', 'feedback', 'total_tokens_used', 'failure_reason',
+                                'retry_count', 'current_step_index', 'final_report'):
                         if key in node_output:
                             val = node_output[key]
                             log_entry['output_summary'][key] = (
@@ -342,9 +344,10 @@ async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
             from src.utils.report_generator import ReportGenerator
             report_gen = ReportGenerator(output_dir="reports")
             executed_steps = task.get('steps', [])
-            verification_details = (
-                final_state.get('verification_details', [])
-                if isinstance(final_state, dict) else []
+            # 从 verifier 节点输出中提取验证结果
+            verifier_output_data = (
+                final_state.get('node_outputs', {}).get('verifier', {})
+                if isinstance(final_state, dict) else {}
             )
             token_tracker_summary = (
                 final_state.get('total_tokens_used', 0)
@@ -354,7 +357,7 @@ async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
                 task_id=task_id,
                 test_goal=request.app_description,
                 executed_steps=executed_steps,
-                verification_details=verification_details,
+                verifier_output=verifier_output_data,
                 reviewer_output=reviewer_output,
                 token_summary={'total_tokens': token_tracker_summary, 'total_cost': 0.0, 'total_records': 0},
                 duration=duration,
@@ -436,89 +439,35 @@ async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
 async def init_device_pool() -> None:
     """初始化设备池
 
-    优先通过 adb devices 检测真实连接的设备，然后从 devices.yaml 补充配置信息。
-    如果 adb 不可用则回退到仅从配置文件加载。
+    从 devices.yaml 配置文件加载设备列表，不依赖 adb devices。
+    这样可以同时支持 Android 和 iOS 设备配置，对齐架构设计文档。
+    adb 仅用于执行层处理系统级操作（安装应用、文件推送等）。
     """
-    import shutil
-    import subprocess
-
     import yaml
 
     device_pool.clear()
 
-    # 先加载 YAML 配置，用于补充设备名称等信息
-    config_devices: dict[str, dict[str, Any]] = {}
     config_path = settings.DEVICE_CONFIG_PATH
     try:
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
         for dev in data.get("devices", []):
-            config_devices[dev["udid"]] = dev
+            caps = dev.get("capabilities", {})
+            device_pool.append({
+                "device_id": dev.get("name", ""),
+                "name": dev.get("name", ""),
+                "platform": dev.get("platform", "Android"),
+                "status": "idle",
+                "udid": dev.get("udid", ""),
+                "appium_port": dev.get("appium_port", 4723),
+                "app_package": caps.get("appPackage", ""),
+                "app_activity": caps.get("appActivity", ""),
+            })
+        logger.info(f"从配置文件加载了 {len(device_pool)} 台设备")
     except FileNotFoundError:
         logger.warning(f"设备配置文件 {config_path} 未找到")
     except Exception as e:
         logger.error(f"设备配置文件加载失败: {e}")
-
-    # 尝试通过 adb 检测真实设备
-    adb_path = shutil.which("adb")
-    if not adb_path:
-        # 检查常见 macOS Android SDK 路径
-        sdk_adb = Path.home() / "Library/Android/sdk/platform-tools/adb"
-        if sdk_adb.exists():
-            adb_path = str(sdk_adb)
-
-    if adb_path:
-        try:
-            result = subprocess.run(
-                [adb_path, "devices"],
-                capture_output=True, text=True, timeout=10,
-            )
-            lines = result.stdout.strip().split("\n")[1:]  # 跳过首行标题
-            for line in lines:
-                parts = line.strip().split()
-                if len(parts) >= 2 and parts[1] == "device":
-                    udid = parts[0]
-                    cfg = config_devices.get(udid, {})
-                    # 通过 adb 获取真实设备型号名称，优先使用真实名称
-                    real_name = ""
-                    try:
-                        model = subprocess.run(
-                            [adb_path, "-s", udid, "shell", "getprop", "ro.product.model"],
-                            capture_output=True, text=True, timeout=5,
-                        ).stdout.strip()
-                        version = subprocess.run(
-                            [adb_path, "-s", udid, "shell", "getprop", "ro.build.version.release"],
-                            capture_output=True, text=True, timeout=5,
-                        ).stdout.strip()
-                        if model:
-                            real_name = f"{model} (Android {version})"
-                    except Exception:
-                        pass
-                    # 如果无法获取真实名称，回退到配置文件或默认值
-                    if not real_name:
-                        real_name = cfg.get("name", f"Android Device ({udid})")
-                    device_pool.append({
-                        "device_id": cfg.get("id", udid),
-                        "name": real_name,
-                        "platform": cfg.get("platform", "Android"),
-                        "status": "idle",
-                        "udid": udid,
-                    })
-            logger.info(f"通过 adb 检测到 {len(device_pool)} 台设备")
-        except Exception as e:
-            logger.warning(f"adb 检测设备失败: {e}")
-
-    # 仅当 adb 不可用时，才回退到配置文件
-    if not adb_path and not device_pool and config_devices:
-        for udid, dev in config_devices.items():
-            device_pool.append({
-                "device_id": dev["id"],
-                "name": dev["name"],
-                "platform": dev["platform"],
-                "status": "offline",
-                "udid": udid,
-            })
-        logger.info(f"adb 不可用，回退到配置文件，加载 {len(device_pool)} 台设备（离线）")
 
     logger.info(f"设备池初始化完成，共 {len(device_pool)} 台设备")
 
@@ -595,8 +544,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
     await init_langgraph_workflow()
     logger.info("应用启动完成")
     yield
-    # 关闭时的清理逻辑
+    # 关闭时的清理逻辑：断开所有设备连接，停止 Appium 服务
     logger.info("应用关闭中，正在释放资源...")
+    try:
+        if hasattr(app.state, 'mcp_server') and app.state.mcp_server:
+            dm = app.state.mcp_server._device_manager
+            dm.disconnect_all()
+            logger.info("所有设备连接已断开")
+            # 停止自动启动的 Appium Server
+            if dm._appium_service and dm._appium_service.is_running:
+                dm._appium_service.stop()
+                logger.info("Appium Server 已停止")
+    except Exception as e:
+        logger.warning(f"资源清理时出错: {e}")
     device_pool.clear()
     task_store.clear()
     logger.info("资源已释放，应用关闭完成")
