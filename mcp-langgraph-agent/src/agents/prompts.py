@@ -210,16 +210,27 @@ VERIFIER_PROMPT = """## 任务目标
 ## 已执行的操作
 {executed_actions}
 
-## 当前界面信息
+## 当前界面信息（操作后的最新状态）
 ### UI 结构树
 {ui_tree}
 
 ### 截图描述
 {screenshot_description}
 
+## 重要判定规则
+1. **MCP 执行结果是强证据**：如果 executed_actions 中 passed=true 且 MCP 工具返回成功，
+   这说明操作确实在设备上执行了，应倾向于判定 passed。
+2. **只有确凿的反证才能推翻**：只有当 UI 树或截图中存在明确的矛盾证据
+   （如预期输入的文本完全不在界面中），才能判定 failed。
+3. **不确定时选择 passed**：如果界面信息不够明确，但 MCP 执行成功，应判定 passed 而非 partial。
+4. **partial 仅用于部分验证点通过**：仅当部分验证点明确失败、部分通过时才使用 partial。
+
 ## 输出要求
 请以 JSON 格式输出验证结果，包含以下字段：
 - `overall_status`: 总体验证状态（passed/failed/partial）
+  - passed: 操作成功执行且结果符合预期
+  - failed: 有明确证据表明操作未生效
+  - partial: 部分验证点通过、部分失败
 - `verification_details`: 每个验证点的详细结果，包含：
   - `point`: 验证点描述
   - `expected`: 预期值

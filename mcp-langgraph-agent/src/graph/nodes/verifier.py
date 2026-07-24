@@ -137,11 +137,41 @@ async def verifier_node(state: AgentState) -> Dict[str, Any]:
     # 获取 Agent 实例
     agent: VerifierAgent = get_verifier_agent()
 
+    # MCP 执行成功后，获取最新 UI 数据供 LLM 验证
+    # 否则 LLM 看到的是执行前的旧状态，会误判
+    fresh_ui_tree: str = state.get('ui_tree', '')
+    fresh_screenshot_b64: str = state.get('screenshot_b64', '')
+
+    if execution_passed:
+        try:
+            from src.graph.nodes.executor import get_executor_agent
+            executor_agent = get_executor_agent()
+            device_name: str = state.get('device_name', '')
+
+            if executor_agent.mcp_client and device_name:
+                # 获取最新 UI 树
+                ui_result = await executor_agent.mcp_client.call_tool(
+                    'get_ui_tree', {'device_name': device_name, 'compress': True}
+                )
+                if isinstance(ui_result, dict) and ui_result.get('success', False):
+                    fresh_ui_tree = ui_result.get('data', {}).get('tree', fresh_ui_tree)
+                    logger.info("[Verifier] 已获取最新 UI 树用于验证")
+
+                # 获取最新截图
+                sc_result = await executor_agent.mcp_client.call_tool(
+                    'take_screenshot', {'device_name': device_name}
+                )
+                if isinstance(sc_result, dict) and sc_result.get('success', False):
+                    fresh_screenshot_b64 = sc_result.get('data', {}).get('screenshot', fresh_screenshot_b64)
+                    logger.info("[Verifier] 已获取最新截图用于验证")
+        except Exception as e:
+            logger.warning(f"[Verifier] 获取最新 UI 数据失败，使用旧数据: {e}")
+
     # 调用 Agent 执行验证
     verify_result: Dict[str, Any] = await agent.run(
         execution_record=last_execution,
-        ui_tree=state.get('ui_tree', ''),
-        screenshot_b64=state.get('screenshot_b64', ''),
+        ui_tree=fresh_ui_tree,
+        screenshot_b64=fresh_screenshot_b64,
         test_plan=state.get('test_plan', []),
     )
 

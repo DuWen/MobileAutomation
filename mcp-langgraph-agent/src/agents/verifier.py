@@ -119,7 +119,17 @@ class VerifierAgent(BaseAgent):
 
         # 判断总体是否通过
         overall_status: str = verify_result.get('overall_status', 'partial')
-        verification_passed: bool = overall_status == 'passed'
+        execution_passed: bool = execution_record.get('passed', False)
+
+        # MCP 执行成功时，partial 视为 passed
+        # 小模型常返回 partial 而非 passed，当 MCP 已确认操作成功时应信任 MCP 结果
+        if overall_status == 'partial' and execution_passed:
+            verification_passed: bool = True
+            logger.info(
+                "[VerifierAgent] MCP 执行成功，partial 视为 passed"
+            )
+        else:
+            verification_passed = overall_status == 'passed'
 
         # 生成失败原因（验证不通过时）
         failure_reason: str = ''
