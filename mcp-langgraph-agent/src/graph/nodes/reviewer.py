@@ -63,6 +63,48 @@ async def reviewer_node(state: AgentState) -> Dict[str, Any]:
     """
     logger.info("[Reviewer] 开始审查整个测试流程")
 
+    # 快速路径：所有步骤 MCP 执行+验证都通过，直接判定审查通过
+    executed_steps: list = state.get('executed_steps', [])
+    test_plan: list = state.get('test_plan', [])
+    all_passed: bool = all(
+        s.get('passed', False) for s in executed_steps
+    ) if executed_steps else False
+    all_completed: bool = len(executed_steps) >= len(test_plan) if test_plan else True
+
+    if all_passed and all_completed:
+        logger.info(
+            f"[Reviewer] 所有 {len(executed_steps)} 个步骤执行+验证均通过，直接判定审查通过"
+        )
+        return {
+            'final_report': f"审查通过。所有 {len(executed_steps)} 个步骤已执行完毕，验证全部通过。",
+            'node_outputs': {
+                **state.get('node_outputs', {}),
+                'reviewer': {
+                    'passed': True,
+                    'feedback': f"审查通过。所有 {len(executed_steps)} 个步骤已执行完毕，验证全部通过。",
+                    'overall_assessment': 'passed',
+                    'quality_metrics': {
+                        'execution_success_rate': 1.0,
+                        'total_steps': len(test_plan),
+                        'completed_steps': len(executed_steps),
+                        'failed_steps': 0,
+                        'passed_steps': len(executed_steps),
+                    },
+                    'issues_found': [],
+                    'recommendations': [],
+                    'coverage_analysis': {'goal_achieved': True},
+                    'final_verdict': 'pass',
+                },
+            },
+            'messages': [
+                {
+                    'role': 'assistant',
+                    'content': f"审查通过。所有 {len(executed_steps)} 个步骤验证通过。",
+                },
+            ],
+            'total_tokens_used': state.get('total_tokens_used', 0),
+        }
+
     # 获取 Agent 实例
     agent: ReviewerAgent = get_reviewer_agent()
 

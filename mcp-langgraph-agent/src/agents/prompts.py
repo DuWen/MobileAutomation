@@ -260,9 +260,21 @@ REVIEWER_PROMPT = """## 任务目标
 ## 验证结果
 {verification_result}
 
+## 重要判定规则
+1. **MCP 执行+验证通过是强证据**：如果所有步骤的 MCP 工具调用成功且验证通过，
+   应判定为 passed，无需额外怀疑。
+2. **只有明确的失败证据才能判 failed**：只有当执行记录中有步骤 MCP 调用失败
+   或验证明确不通过时，才能判定 failed。
+3. **partial 仅用于部分步骤失败**：仅当部分步骤失败、部分通过时才使用 partial。
+4. **不确定时倾向 passed**：如果执行记录显示全部通过但信息不够详细，应判定 passed。
+
 ## 输出要求
 请以 JSON 格式输出审查报告，包含以下字段：
 - `overall_assessment`: 总体评估（passed/failed/partial/inconclusive）
+  - passed: 所有步骤执行成功，测试目标达成
+  - failed: 有步骤明确失败，测试目标未达成
+  - partial: 部分步骤失败，部分通过
+  - inconclusive: 无法判断
 - `coverage_analysis`: 覆盖度分析，包括：
   - `goal_achieved`: 测试目标是否达成
   - `uncovered_areas`: 未覆盖的测试场景

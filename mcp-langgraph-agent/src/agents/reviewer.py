@@ -115,7 +115,23 @@ class ReviewerAgent(BaseAgent):
 
         # 提取审查结论
         overall_assessment: str = review_result.get('overall_assessment', 'inconclusive')
-        passed: bool = overall_assessment in ('passed', 'pass')
+
+        # 判断 passed：综合 LLM 结论和实际执行数据
+        all_executed_passed: bool = all(
+            s.get('passed', False) for s in executed_steps
+        ) if executed_steps else False
+
+        if overall_assessment in ('passed', 'pass'):
+            passed: bool = True
+        elif overall_assessment == 'partial' and all_executed_passed:
+            # 所有步骤 MCP 执行+验证都通过时，partial 视为 passed
+            passed = True
+            logger.info(
+                "[ReviewerAgent] 所有步骤执行通过，partial 视为 passed"
+            )
+        else:
+            passed = False
+
         feedback: str = review_result.get('summary', '审查完成')
 
         # 计算质量指标

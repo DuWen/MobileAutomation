@@ -631,9 +631,11 @@ class DeviceManager:
     def _is_session_alive(self, driver: WebDriver) -> bool:
         """检查 WebDriver 会话是否仍然有效。
 
-        通过调用 driver.session_id 判断会话是否存在。
-        当 Appium 服务端会话被超时回收、UiAutomator2 进程崩溃、
-        或其他原因导致会话失效时，需要检测并触发重连。
+        使用 Appium 兼容的健康检查方式，确保真正向服务端发请求验证：
+        1. 检查 session_id 是否存在（本地属性，零开销）
+        2. 通过 lightweight Appium 命令验证会话存活（必须经过网络）
+        不使用 driver.current_url（移动端无 URL 概念），
+        不使用 driver.capabilities（本地缓存，无法感知服务端会话死亡）。
 
         Args:
             driver: Appium WebDriver 实例。
@@ -642,11 +644,41 @@ class DeviceManager:
             会话是否仍然有效。
         """
         try:
-            # 尝试获取 session_id，如果会话已失效会抛出异常
-            _ = driver.session_id
-            # 尝试一个轻量级操作来验证会话真正有效
-            driver.current_url  # 如果会话失效，这里会抛出 NoSuchDriverError
-            return True
+            # 快速检查：session_id 是否存在（本地属性，无网络开销）
+            if not driver.session_id:
+                return False
+
+            # 方式1：查询 Appium 活跃会话列表，确认当前 session 在列
+            try:
+                from selenium.webdriver.remote.command import Command
+                response = driver.command_executor.execute(
+                    Command.GET_ALL_SESSIONS
+                )
+                active_sessions = response.get('value', [])
+                for session in active_sessions:
+                    if session.get('id') == driver.session_id:
+                        return True
+                # session 不在活跃列表中 → 服务端已失效
+                logger.info(
+                    "会话 %s 不在 Appium 活跃列表中，判定失效",
+                    driver.session_id[:8],
+                )
+                return False
+            except Exception:
+                pass
+
+            # 方式2：执行轻量级 Appium 命令验证会话存活
+            # mobile:getDeviceTime 非常轻量，仅获取设备时间
+            try:
+                driver.execute_script("mobile: getDeviceTime")
+                return True
+            except Exception:
+                logger.info(
+                    "会话 %s 执行 mobile:getDeviceTime 失败，判定失效",
+                    driver.session_id[:8],
+                )
+                return False
+
         except Exception:
             return False
 
