@@ -10,9 +10,6 @@ import base64
 import logging
 import os
 import time
-from typing import Dict
-
-
 
 from src.utils.screenshot import compress_screenshot as _compress_screenshot
 from src.utils.xml_compressor import compress_xml
@@ -93,11 +90,11 @@ class VisionToolkit:
 
             logger.info("截图已保存到本地文件: %s", file_path)
             return file_path
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("截图保存到本地文件失败: %s", e)
             return ""
 
-    def take_screenshot(self, device_name: str) -> Dict:
+    def take_screenshot(self, device_name: str) -> dict:
         """获取设备当前屏幕截图，并保存到本地文件。
 
         通过 Appium WebDriver 截取设备屏幕，返回 base64 编码的图片数据。
@@ -148,16 +145,16 @@ class VisionToolkit:
                     "file_path": file_path,
                 },
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("截图失败: %s", e)
             return {
                 "success": False,
-                "data": {"message": f"截图失败: {str(e)}", "device_name": device_name, "error": str(e)},
+                "data": {"message": f"截图失败: {e!s}", "device_name": device_name, "error": str(e)},
             }
 
     def get_ui_tree(
         self, device_name: str, compress: bool = True, aggressive: bool = False
-    ) -> Dict:
+    ) -> dict:
         """获取设备当前页面的 UI 无障碍树结构。
 
         通过 Appium 获取页面源（page source），即 XML 格式的无障碍树。
@@ -213,9 +210,9 @@ class VisionToolkit:
                         "device_name": device_name,
                     },
                 }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("获取 UI 树失败: %s", e)
             return {
                 "success": False,
-                "data": {"message": f"获取 UI 树失败: {str(e)}", "device_name": device_name, "error": str(e)},
+                "data": {"message": f"获取 UI 树失败: {e!s}", "device_name": device_name, "error": str(e)},
             }

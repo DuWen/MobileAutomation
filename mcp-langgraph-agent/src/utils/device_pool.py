@@ -8,7 +8,7 @@ import asyncio
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -39,12 +39,12 @@ class DeviceInfo:
     host: str = '127.0.0.1'
     port: int = 4723
     system_port: int = 8200
-    capabilities: Dict[str, Any] = field(default_factory=dict)
+    capabilities: dict[str, Any] = field(default_factory=dict)
     is_connected: bool = False
-    last_health_check: Optional[datetime] = None
+    last_health_check: datetime | None = None
     is_healthy: bool = True
     in_use: bool = False
-    acquired_at: Optional[datetime] = None
+    acquired_at: datetime | None = None
 
 
 class DevicePool:
@@ -67,7 +67,7 @@ class DevicePool:
             max_size: 池的最大容量，默认 10
         """
         self.max_size: int = max_size
-        self.devices: Dict[str, DeviceInfo] = {}
+        self.devices: dict[str, DeviceInfo] = {}
         self.lock: asyncio.Lock = asyncio.Lock()
 
     async def register_device(self, device: DeviceInfo) -> bool:
@@ -210,18 +210,18 @@ class DevicePool:
                 device.is_healthy = is_healthy
                 device.is_connected = is_healthy
                 return is_healthy
-            except Exception:
+            except Exception:  # noqa: BLE001
                 device.is_healthy = False
                 device.is_connected = False
                 return False
 
-    async def health_check_all(self) -> Dict[str, bool]:
+    async def health_check_all(self) -> dict[str, bool]:
         """对所有设备执行健康检查。
 
         Returns:
             设备 ID 到健康状态的映射字典
         """
-        results: Dict[str, bool] = {}
+        results: dict[str, bool] = {}
         # 获取所有设备 ID 的快照
         async with self.lock:
             device_ids = list(self.devices.keys())
@@ -231,7 +231,7 @@ class DevicePool:
 
         return results
 
-    async def get_available_devices(self, platform: str | None = None) -> List[DeviceInfo]:
+    async def get_available_devices(self, platform: str | None = None) -> list[DeviceInfo]:
         """获取当前可用的设备列表。
 
         Args:
@@ -248,7 +248,7 @@ class DevicePool:
                         available.append(device)
             return available
 
-    async def get_device_count(self) -> Dict[str, int]:
+    async def get_device_count(self) -> dict[str, int]:
         """获取设备池的统计信息。
 
         Returns:
@@ -291,7 +291,7 @@ class DevicePool:
         loaded_count = 0
         try:
             # 先尝试以 JSON 格式读取
-            with open(yaml_path, 'r', encoding='utf-8') as f:
+            with open(yaml_path, encoding='utf-8') as f:
                 content = f.read().strip()
 
             # 尝试解析 JSON

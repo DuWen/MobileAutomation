@@ -9,7 +9,7 @@ MCP Client 封装模块
 import asyncio
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -25,20 +25,18 @@ class MCPClientError(Exception):
     封装所有 MCP 客户端操作中可能出现的异常场景。
     """
 
-    pass
 
 
 class MCPConnectionError(MCPClientError):
     """MCP 连接异常，表示与服务器的连接出现问题。"""
 
-    pass
 
 
 class MCPToolError(MCPClientError):
     """MCP 工具调用异常，表示工具执行时返回错误。"""
 
     def __init__(
-        self, message: str, tool_name: str, result: Optional[Dict] = None
+        self, message: str, tool_name: str, result: dict | None = None
     ) -> None:
         """初始化工具调用异常。
 
@@ -68,7 +66,7 @@ class MCPClient:
     def __init__(
         self,
         server_command: str = "python",
-        server_args: Optional[list] = None,
+        server_args: list | None = None,
         max_retries: int = 3,
         retry_delay: float = 1.0,
         connect_timeout: float = CONNECT_TIMEOUT,
@@ -89,11 +87,11 @@ class MCPClient:
         self.connect_timeout = connect_timeout
 
         # 连接状态
-        self._session: Optional[Any] = None
-        self._stdio_cm: Optional[Any] = None  # stdio_client 上下文管理器
-        self._session_cm: Optional[Any] = None  # ClientSession 上下文管理器
-        self._read_stream: Optional[Any] = None
-        self._write_stream: Optional[Any] = None
+        self._session: Any | None = None
+        self._stdio_cm: Any | None = None  # stdio_client 上下文管理器
+        self._session_cm: Any | None = None  # ClientSession 上下文管理器
+        self._read_stream: Any | None = None
+        self._write_stream: Any | None = None
         self._connected: bool = False
         self._connecting: bool = False  # 防止并发连接
 
@@ -117,7 +115,7 @@ class MCPClient:
         self._connecting = True
         try:
             await asyncio.wait_for(self._do_connect(), timeout=self.connect_timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # 超时后清理资源
             await self._cleanup()
             raise MCPConnectionError(
@@ -131,7 +129,7 @@ class MCPClient:
         except Exception as e:
             await self._cleanup()
             raise MCPConnectionError(
-                f"连接 MCP Server 失败: {str(e)}"
+                f"连接 MCP Server 失败: {e!s}"
             ) from e
         finally:
             self._connecting = False
@@ -150,7 +148,7 @@ class MCPClient:
             from mcp.client.stdio import stdio_client
         except ImportError as e:
             raise MCPConnectionError(
-                f"MCP SDK 未安装，请执行 pip install mcp: {str(e)}"
+                f"MCP SDK 未安装，请执行 pip install mcp: {e!s}"
             ) from e
 
         server_params = StdioServerParameters(
@@ -186,7 +184,7 @@ class MCPClient:
             if cm is not None:
                 try:
                     await cm.__aexit__(None, None, None)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning("[MCPClient] 清理 %s 时出错: %s", name, e)
 
         self._session = None
@@ -207,7 +205,7 @@ class MCPClient:
         try:
             await self._cleanup()
             logger.info("[MCPClient] 已断开连接")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("[MCPClient] 断开连接时发生错误: %s", str(e))
             self._connected = False
 
@@ -227,7 +225,7 @@ class MCPClient:
                 logger.warning("[MCPClient] 自动连接失败: %s", e)
                 raise
 
-    async def list_tools(self) -> list[Dict]:
+    async def list_tools(self) -> list[dict]:
         """获取 MCP Server 上注册的所有工具列表。
 
         Returns:
@@ -250,17 +248,17 @@ class MCPClient:
                 }
                 for tool in result.tools
             ]
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise MCPConnectionError("获取工具列表超时")
         except Exception as e:
             self._connected = False  # 标记为断开，下次自动重连
             raise MCPConnectionError(
-                f"获取工具列表失败: {str(e)}"
+                f"获取工具列表失败: {e!s}"
             ) from e
 
     async def call_tool(
-        self, tool_name: str, arguments: Optional[Dict[str, Any]] = None
-    ) -> Dict:
+        self, tool_name: str, arguments: dict[str, Any] | None = None
+    ) -> dict:
         """调用 MCP Server 上注册的工具。
 
         通过 MCP SDK 的 call_tool 方法向服务器发送工具调用请求，
@@ -289,7 +287,7 @@ class MCPClient:
                 "data": {"message": f"MCP 客户端未连接，工具 {tool_name} 调用降级"},
             }
 
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
         for attempt in range(1, self.max_retries + 1):
             try:
                 result = await asyncio.wait_for(
@@ -310,15 +308,15 @@ class MCPClient:
 
                 return {"success": True, "data": {}}
 
-            except asyncio.TimeoutError:
-                last_error = asyncio.TimeoutError(f"工具 {tool_name} 调用超时")
+            except TimeoutError:
+                last_error = TimeoutError(f"工具 {tool_name} 调用超时")
                 logger.warning(
                     "[MCPClient] 调用工具 '%s' 超时（第 %d/%d 次）",
                     tool_name, attempt, self.max_retries,
                 )
             except MCPToolError:
                 raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 last_error = e
                 if attempt < self.max_retries:
                     wait_time = self.retry_delay * attempt
@@ -356,9 +354,9 @@ class MCPClient:
 
     async def __aexit__(
         self,
-        exc_type: Optional[type],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[object],
+        exc_type: type | None,
+        exc_val: BaseException | None,
+        exc_tb: object | None,
     ) -> None:
         """异步上下文管理器出口。
 

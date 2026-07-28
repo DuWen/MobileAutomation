@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +221,7 @@ class HybridPerception:
                 logger.warning("[HybridPerception] 获取 UI 树失败: %s", error_msg)
                 return "", False, 0
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("[HybridPerception] 获取 UI 树异常: %s", e)
             return "", False, 0
 
@@ -256,7 +256,7 @@ class HybridPerception:
                 logger.warning("[HybridPerception] 获取截图失败: %s", error_msg)
                 return "", False, 0
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("[HybridPerception] 获取截图异常: %s", e)
             return "", False, 0
 
@@ -325,7 +325,7 @@ class HybridPerception:
             logger.warning("[HybridPerception] UI 树 JSON 解析失败: %s", e)
             return False
 
-    def estimate_token_savings(self, result: PerceptionResult) -> Dict[str, Any]:
+    def estimate_token_savings(self, result: PerceptionResult) -> dict[str, Any]:
         """估算当前感知策略相比纯截图模式的 Token 节省量。
 
         基于 UI 树和截图的数据大小估算 Token 节省比例。

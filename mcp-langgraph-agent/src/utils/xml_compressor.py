@@ -8,13 +8,13 @@
 import json
 import logging
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, List, Set
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 # 需要保留的 XML 属性白名单
-_KEEP_ATTRIBUTES: Set[str] = {
+_KEEP_ATTRIBUTES: set[str] = {
     'class',
     'text',
     'bounds',
@@ -33,7 +33,7 @@ _KEEP_ATTRIBUTES: Set[str] = {
 }
 
 # 需要移除的冗余容器类名
-_REDUNDANT_CONTAINERS: Set[str] = {
+_REDUNDANT_CONTAINERS: set[str] = {
     'android.widget.FrameLayout',
     'android.widget.LinearLayout',
     'android.widget.RelativeLayout',
@@ -57,7 +57,7 @@ _REDUNDANT_CONTAINERS: Set[str] = {
 }
 
 # 需要保留的交互式容器（即使类名在冗余列表中也不移除）
-_INTERACTIVE_CONTAINERS: Set[str] = {
+_INTERACTIVE_CONTAINERS: set[str] = {
     'android.widget.ScrollView',
     'android.widget.HorizontalScrollView',
     'androidx.recyclerview.widget.RecyclerView',
@@ -65,7 +65,7 @@ _INTERACTIVE_CONTAINERS: Set[str] = {
 }
 
 # 纯装饰类黑名单：aggressive 模式下，这些类名的叶子节点若无交互/文本则过滤
-_PURE_DECORATIVE_CLASSES: Set[str] = {
+_PURE_DECORATIVE_CLASSES: set[str] = {
     'android.widget.ImageView',
     'android.widget.Space',
     'android.view.View',
@@ -74,7 +74,7 @@ _PURE_DECORATIVE_CLASSES: Set[str] = {
 
 # 状态语义类白名单：aggressive 模式下也强制保留（承载页面状态语义）
 # 这些节点可能无交互属性，但对 Verifier 断言与 Explorer 状态判断至关重要
-_STATE_CLASSES: Set[str] = {
+_STATE_CLASSES: set[str] = {
     'android.widget.ProgressBar',          # 加载状态
     'android.widget.Switch',               # 开关状态
     'android.widget.CheckBox',             # 勾选状态
@@ -87,7 +87,7 @@ _STATE_CLASSES: Set[str] = {
 }
 
 
-def _filter_attributes(attrs: Dict[str, str]) -> Dict[str, str]:
+def _filter_attributes(attrs: dict[str, str]) -> dict[str, str]:
     """过滤属性，仅保留白名单中的属性。
 
     Args:
@@ -101,7 +101,7 @@ def _filter_attributes(attrs: Dict[str, str]) -> Dict[str, str]:
 
 def _is_redundant_container(
     class_name: str,
-    attrs: Dict[str, str],
+    attrs: dict[str, str],
     child_count: int,
 ) -> bool:
     """判断是否为冗余容器节点。
@@ -145,7 +145,7 @@ def _is_redundant_container(
     return True
 
 
-def _is_meaningful_leaf(attrs: Dict[str, str]) -> bool:
+def _is_meaningful_leaf(attrs: dict[str, str]) -> bool:
     """判断叶子节点是否值得保留（aggressive 模式下使用）。
 
     判定规则按优先级：
@@ -194,12 +194,12 @@ def _is_meaningful_leaf(attrs: Dict[str, str]) -> bool:
 
 
 def _node_to_dict(
-    node: Dict[str, Any],
+    node: dict[str, Any],
     current_depth: int,
     max_depth: int,
     max_children: int,
     aggressive: bool = False,
-) -> Dict[str, Any] | None:
+) -> dict[str, Any] | None:
     """递归将 XML 节点转换为精简字典。
 
     递归遍历 XML 节点树，应用深度截断、属性过滤和冗余容器移除策略。
@@ -231,7 +231,7 @@ def _node_to_dict(
     original_children = node.get('children', [])
     if _is_redundant_container(class_name, filtered_attrs, len(original_children)):
         # 冗余容器：跳过自身，直接递归处理子节点并提升
-        promoted: List[Dict[str, Any]] = []
+        promoted: list[dict[str, Any]] = []
         for child in original_children[:max_children]:
             child_result = _node_to_dict(
                 child,
@@ -255,7 +255,7 @@ def _node_to_dict(
         return None
 
     # 非冗余容器：正常递归处理子节点
-    processed_children: List[Dict[str, Any]] = []
+    processed_children: list[dict[str, Any]] = []
     for child in original_children[:max_children]:
         child_result = _node_to_dict(
             child,
@@ -274,7 +274,7 @@ def _node_to_dict(
             return None
 
     # 构建结果节点
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         'class': filtered_attrs.get('class', ''),
     }
 
@@ -298,7 +298,7 @@ def _node_to_dict(
     return result
 
 
-def _parse_xml_to_tree(xml_str: str) -> Dict[str, Any] | None:
+def _parse_xml_to_tree(xml_str: str) -> dict[str, Any] | None:
     """使用 xml.etree.ElementTree 解析 XML 为节点树。
 
     替代之前不可靠的正则解析方式，使用 Python 标准库的 XML 解析器
@@ -316,7 +316,7 @@ def _parse_xml_to_tree(xml_str: str) -> Dict[str, Any] | None:
         logger.error("[xml_compressor] XML 解析失败: %s", e)
         return None
 
-    def _element_to_dict(element: ET.Element) -> Dict[str, Any]:
+    def _element_to_dict(element: ET.Element) -> dict[str, Any]:
         """递归将 ElementTree 元素转换为节点字典。
 
         Args:
@@ -326,10 +326,10 @@ def _parse_xml_to_tree(xml_str: str) -> Dict[str, Any] | None:
             包含 tag, attrs, children 的节点字典
         """
         # 将 Element 的 attrib 转换为普通字典
-        attrs: Dict[str, str] = dict(element.attrib)
+        attrs: dict[str, str] = dict(element.attrib)
 
         # 递归处理子元素
-        children: List[Dict[str, Any]] = []
+        children: list[dict[str, Any]] = []
         for child in element:
             children.append(_element_to_dict(child))
 
@@ -383,7 +383,7 @@ def compress_xml(
     compression_ratio = compressed_size / original_size if original_size > 0 else 1.0
 
     # 统计原始和压缩后的元素数量
-    def _count_elements(node: Dict[str, Any]) -> int:
+    def _count_elements(node: dict[str, Any]) -> int:
         count = 1
         for child in node.get('children', []):
             count += _count_elements(child)

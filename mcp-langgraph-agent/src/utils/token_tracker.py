@@ -7,8 +7,8 @@
 import json
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -17,7 +17,7 @@ logger = __import__('logging').getLogger(__name__)
 # 模型定价表（每千 Token 的价格，单位：美元）
 # 参考各模型官方定价，如有变动请及时更新
 # ============================================================
-_MODEL_PRICING: Dict[str, Dict[str, float]] = {
+_MODEL_PRICING: dict[str, dict[str, float]] = {
     'gpt-4o':                {'input': 0.005,  'output': 0.015},
     'gpt-4o-mini':           {'input': 0.00015, 'output': 0.0006},
     'gpt-4-turbo':           {'input': 0.01,   'output': 0.03},
@@ -71,7 +71,7 @@ class TokenTracker:
     def __init__(
         self,
         cost_alert_threshold: float = 5.0,
-        cost_alert_callback: Optional[Callable[[Dict], None]] = None,
+        cost_alert_callback: Callable[[dict], None] | None = None,
     ) -> None:
         """初始化 Token 追踪器。
 
@@ -81,10 +81,10 @@ class TokenTracker:
             cost_alert_callback: 成本告警回调函数，接收告警信息字典。
                 回调函数签名: callback(alert_info: Dict) -> None
         """
-        self.records: List[TokenUsageRecord] = []
+        self.records: list[TokenUsageRecord] = []
         self.session_start: float = time.time()
         self.cost_alert_threshold: float = cost_alert_threshold
-        self.cost_alert_callback: Optional[Callable[[Dict], None]] = cost_alert_callback
+        self.cost_alert_callback: Callable[[dict], None] | None = cost_alert_callback
         self._alert_triggered: bool = False
 
     def add_record(
@@ -129,7 +129,7 @@ class TokenTracker:
 
         return record
 
-    def get_summary(self) -> Dict:
+    def get_summary(self) -> dict:
         """获取累积统计摘要。
 
         计算所有记录的汇总数据，包括总消耗、各模型消耗等。
@@ -158,11 +158,11 @@ class TokenTracker:
             }
 
         # 按模型分组统计
-        by_model: Dict[str, Dict] = defaultdict(
+        by_model: dict[str, dict] = defaultdict(
             lambda: {'calls': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0, 'cost': 0.0}
         )
         # 按层级分组统计
-        by_tier: Dict[str, Dict] = defaultdict(
+        by_tier: dict[str, dict] = defaultdict(
             lambda: {'calls': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0, 'cost': 0.0}
         )
 
@@ -200,7 +200,7 @@ class TokenTracker:
             'session_duration': round(time.time() - self.session_start, 2),
         }
 
-    def get_records(self, operation: str | None = None) -> List[TokenUsageRecord]:
+    def get_records(self, operation: str | None = None) -> list[TokenUsageRecord]:
         """获取 Token 消耗记录列表。
 
         Args:
@@ -322,7 +322,7 @@ class TokenTracker:
         total_cost = sum(r.cost for r in self.records)
         if total_cost >= self.cost_alert_threshold:
             self._alert_triggered = True
-            alert_info: Dict = {
+            alert_info: dict = {
                 'event': 'cost_alert',
                 'total_cost': round(total_cost, 6),
                 'threshold': self.cost_alert_threshold,
@@ -341,13 +341,13 @@ class TokenTracker:
             if self.cost_alert_callback:
                 try:
                     self.cost_alert_callback(alert_info)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.error("[TokenTracker] 成本告警回调执行失败: %s", e)
 
     def set_cost_alert(
         self,
         threshold: float | None = None,
-        callback: Callable[[Dict], None] | None = None,
+        callback: Callable[[dict], None] | None = None,
     ) -> None:
         """动态设置成本告警参数。
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from src.agents.base import BaseAgent
 from src.agents.llm import ModelRouter
@@ -47,7 +47,7 @@ class ExplorerAgent(BaseAgent):
             token_tracker=token_tracker,
         )
 
-    async def run(self, **kwargs: Any) -> Dict[str, Any]:
+    async def run(self, **kwargs: Any) -> dict[str, Any]:
         """运行探索 Agent 的核心逻辑。
 
         分析测试目标和当前界面状态，识别功能点和关键元素。
@@ -95,7 +95,7 @@ class ExplorerAgent(BaseAgent):
         )
 
         # 解析 LLM 返回的 JSON 结果
-        exploration_result: Dict[str, Any] = self._parse_json_response(
+        exploration_result: dict[str, Any] = self._parse_json_response(
             response,
             fallback={
                 'analysis': f'分析测试目标「{test_goal}」的核心意图',
@@ -112,7 +112,7 @@ class ExplorerAgent(BaseAgent):
 
         return exploration_result
 
-    def _parse_json_response(self, response: str, fallback: Dict[str, Any]) -> Dict[str, Any]:
+    def _parse_json_response(self, response: str, fallback: dict[str, Any]) -> dict[str, Any]:
         """解析 LLM 返回的 JSON 格式响应。
 
         尝试从 LLM 回复中提取 JSON 对象，解析失败时返回 fallback 结果。

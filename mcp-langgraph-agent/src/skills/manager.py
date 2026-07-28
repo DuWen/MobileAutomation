@@ -11,7 +11,6 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +38,8 @@ class Skill:
     name: str
     file_path: Path
     content: str
-    keywords: List[str] = field(default_factory=list)
-    tags: List[str] = field(default_factory=list)
+    keywords: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
 
 # ============================================================
@@ -70,7 +69,7 @@ class SkillManager:
             skills_dir: Skills 目录路径，为 None 时使用默认路径 "skills"
         """
         self._skills_dir = Path(skills_dir or "skills")
-        self._skills: Dict[str, Skill] = {}
+        self._skills: dict[str, Skill] = {}
         self._load_skills()
 
     # ── 加载与解析 ──────────────────────────────────────────────
@@ -95,7 +94,7 @@ class SkillManager:
                 skill = self._parse_skill_file(md_file)
                 self._skills[skill.name] = skill
                 logger.info("已加载 Skill: %s (关键词: %s)", skill.name, skill.keywords[:5])
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("加载 Skill 文件失败 %s: %s", md_file, e)
 
         logger.info("共加载 %d 个 Skills", len(self._skills))
@@ -124,7 +123,7 @@ class SkillManager:
             tags=tags,
         )
 
-    def _extract_keywords(self, content: str) -> List[str]:
+    def _extract_keywords(self, content: str) -> list[str]:
         """从 Skill 内容中提取关键词。
 
         提取标题、适用场景、列表项中的关键短语，用于后续匹配。
@@ -136,7 +135,7 @@ class SkillManager:
         Returns:
             去重后的关键词列表
         """
-        keywords: List[str] = []
+        keywords: list[str] = []
 
         # 提取所有标题文本（去掉 # 前缀）
         headings = re.findall(r'^#+\s+(.+)$', content, re.MULTILINE)
@@ -176,7 +175,7 @@ class SkillManager:
 
         # 去重，保持顺序
         seen: set = set()
-        unique: List[str] = []
+        unique: list[str] = []
         for kw in keywords:
             if kw not in seen:
                 seen.add(kw)
@@ -184,7 +183,7 @@ class SkillManager:
 
         return unique
 
-    def _extract_tags(self, content: str) -> List[str]:
+    def _extract_tags(self, content: str) -> list[str]:
         """从 Skill 文件头部提取元数据标签。
 
         解析 Markdown 文件顶部的 YAML front matter 或
@@ -196,7 +195,7 @@ class SkillManager:
         Returns:
             标签列表
         """
-        tags: List[str] = []
+        tags: list[str] = []
 
         # 尝试提取 YAML front matter 中的 tags
         front_matter = re.match(r'^---\s*\n(.*?)\n---', content, re.DOTALL)
@@ -221,7 +220,7 @@ class SkillManager:
         test_goal: str,
         top_k: int = 3,
         threshold: float = 0.1,
-    ) -> List[Skill]:
+    ) -> list[Skill]:
         """根据测试目标匹配最相关的 Skills。
 
         使用关键词重叠度计算相关性分数，返回得分最高的
@@ -244,7 +243,7 @@ class SkillManager:
         # 提取测试目标中的关键词
         goal_tokens = self._tokenize(test_goal)
 
-        scored: List[tuple[float, Skill]] = []
+        scored: list[tuple[float, Skill]] = []
         for skill in self._skills.values():
             score = self._compute_relevance(goal_tokens, skill)
             if score >= threshold:
@@ -262,7 +261,7 @@ class SkillManager:
             )
         return matched
 
-    def _tokenize(self, text: str) -> List[str]:
+    def _tokenize(self, text: str) -> list[str]:
         """将文本拆分为关键词 token 列表。
 
         支持中英文混合文本，中文按字/词分割，英文按空格分割。
@@ -273,7 +272,7 @@ class SkillManager:
         Returns:
             token 列表
         """
-        tokens: List[str] = []
+        tokens: list[str] = []
 
         # 提取英文单词
         english_words = re.findall(r'[a-zA-Z]{2,}', text)
@@ -292,7 +291,7 @@ class SkillManager:
 
         return tokens
 
-    def _compute_relevance(self, goal_tokens: List[str], skill: Skill) -> float:
+    def _compute_relevance(self, goal_tokens: list[str], skill: Skill) -> float:
         """计算测试目标与 Skill 的相关性分数。
 
         基于 goal_tokens 与 skill.keywords 的重叠度和子串包含关系计算。
@@ -335,7 +334,7 @@ class SkillManager:
 
     # ── 格式化与注入 ────────────────────────────────────────────
 
-    def format_skills_for_prompt(self, skills: List[Skill]) -> str:
+    def format_skills_for_prompt(self, skills: list[Skill]) -> str:
         """将匹配到的 Skills 格式化为可注入提示词的文本。
 
         每个 Skill 的内容以分隔线包裹，确保 LLM 能清晰识别
@@ -350,7 +349,7 @@ class SkillManager:
         if not skills:
             return ""
 
-        parts: List[str] = []
+        parts: list[str] = []
         for i, skill in enumerate(skills, 1):
             parts.append(f"### 相关技能知识 [{i}]: {skill.name}")
             parts.append(skill.content)
@@ -388,7 +387,7 @@ class SkillManager:
 
     # ── 查询接口 ────────────────────────────────────────────────
 
-    def get_skill(self, name: str) -> Optional[Skill]:
+    def get_skill(self, name: str) -> Skill | None:
         """按名称获取 Skill。
 
         Args:
@@ -399,7 +398,7 @@ class SkillManager:
         """
         return self._skills.get(name)
 
-    def list_skills(self) -> List[str]:
+    def list_skills(self) -> list[str]:
         """列出所有已加载的 Skill 名称。
 
         Returns:

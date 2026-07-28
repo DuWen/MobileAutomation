@@ -58,3 +58,54 @@ mcp-langgraph-agent = "src.main:main"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+# =============================================================================
+# Ruff 配置
+# =============================================================================
+# CI 运行 `ruff check src/ tests/ scripts/`，默认规则集过于激进。
+# 此处显式选择规则集并豁免与项目风格冲突的规则，保持代码质量门禁稳定。
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["venv", ".venv", "build", "dist"]
+
+[tool.ruff.lint]
+# 启用规则集：
+#   E/F/W   — pycodestyle + Pyflakes 基础
+#   I       — isort 导入排序
+#   UP      — pyupgrade 现代化类型注解
+#   N       — 命名规范
+#   B       — flake8-bugbear 常见陷阱
+#   C4      — flake8-comprehensions
+#   PIE     — flake8-pie
+#   SIM     — flake8-simplify
+select = ["E", "F", "W", "I", "UP", "N", "B", "C4", "PIE", "SIM"]
+ignore = [
+    "E501",     # 行长度由 line-length 控制，避免与格式化冲突
+    "B008",     # 函数默认值中调用函数（FastAPI Depends 常用模式）
+    "SIM102",   # 嵌套 if 合并（可读性优先）
+    "SIM103",   # 直接返回条件（可读性优先）
+    "SIM115",   # 强制使用上下文管理器（测试/脚本可放宽）
+    "RUF012",   # 类属性可变默认值（dataclass 风格）
+    "RUF059",   # 未使用解包变量（pytest 测试模式常见）
+    "DTZ005",   # datetime.now() 无 tz（业务无关，统一后续治理）
+    "ASYNC230", # 异步函数中阻塞文件 IO（暂不重构）
+    "S110",     # try-except-pass（容错探测场景）
+    "PERF402",  # list.copy 优化
+    "PYI034",   # __aenter__ 返回 self
+    "PYI036",   # __aexit__ 类型注解
+    "PLC0206",  # 字典解包 .items()
+    "C401",     # 集合生成器
+    "PIE810",   # startswith 多次调用
+    "PLW1510",  # subprocess.run 无 check
+    "BLE001",   # 裸 Exception 捕获（容错场景）
+    "SIM105",   # contextlib.suppress 替代 try-except-pass（可读性优先）
+    "B904",     # raise ... from err（重构成本高，后续统一治理）
+    "UP042",    # StrEnum 继承重构（涉及序列化兼容性）
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试代码允许 assert、MagicMock 等模式
+"tests/**/*.py" = ["S101", "S106", "N806"]
+# 脚本类允许 subprocess、容错捕获
+"scripts/**/*.py" = ["S101", "S110", "BLE001", "PLW1510", "T201"]

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any, Dict, List
+from typing import Any
 
 from src.agents.base import BaseAgent
 from src.agents.llm import ModelRouter
@@ -32,7 +32,7 @@ class ExecutorAgent(BaseAgent):
     DEFAULT_MODEL_TIER: str = 'standard'
 
     # MCP 工具名映射表：LLM 常用的工具名 → MCP Server 注册的工具名
-    TOOL_NAME_MAP: Dict[str, str] = {
+    TOOL_NAME_MAP: dict[str, str] = {
         'mobile_tap': 'tap_element',
         'mobile_input_text': 'input_text',
         'mobile_swipe': 'swipe',
@@ -69,7 +69,7 @@ class ExecutorAgent(BaseAgent):
         )
         self.mcp_client = mcp_client
 
-    async def run(self, **kwargs: Any) -> Dict[str, Any]:
+    async def run(self, **kwargs: Any) -> dict[str, Any]:
         """运行执行 Agent 的核心逻辑。
 
         分析当前测试步骤，调用 LLM 决定需要执行的操作，
@@ -123,7 +123,7 @@ class ExecutorAgent(BaseAgent):
         )
 
         # 解析 LLM 返回的操作指令
-        action_result: Dict[str, Any] = self._parse_json_response(
+        action_result: dict[str, Any] = self._parse_json_response(
             response,
             fallback={
                 'step_executed': current_step_index + 1,
@@ -137,7 +137,7 @@ class ExecutorAgent(BaseAgent):
         )
 
         # 提取 MCP 工具调用列表
-        mcp_calls: List[Dict[str, Any]] = []
+        mcp_calls: list[dict[str, Any]] = []
         tool_actions = action_result.get('tool_actions', [])
 
         # 如果有 MCP Client，执行工具调用
@@ -153,7 +153,7 @@ class ExecutorAgent(BaseAgent):
 
         # 判断 passed：严格基于 MCP 调用结果，忽略 LLM 返回的 status
         passed: bool = False
-        failed_tools: List[str] = []
+        failed_tools: list[str] = []
 
         if mcp_calls:
             # 有 MCP 调用时，检查所有调用是否真正成功
@@ -190,7 +190,7 @@ class ExecutorAgent(BaseAgent):
             mcp_error_str = '; '.join(mcp_errors)
             error_info = mcp_error_str if not error_info else f"{error_info}; {mcp_error_str}"
 
-        execution_record: Dict[str, Any] = {
+        execution_record: dict[str, Any] = {
             'step': current_step,
             'step_index': current_step_index,
             'action': action_result.get('action_performed', current_step),
@@ -210,8 +210,8 @@ class ExecutorAgent(BaseAgent):
         return execution_record
 
     async def _execute_mcp_tools(
-        self, tool_actions: List[Dict[str, Any]], device_name: str = ''
-    ) -> List[Dict[str, Any]]:
+        self, tool_actions: list[dict[str, Any]], device_name: str = ''
+    ) -> list[dict[str, Any]]:
         """执行 MCP 工具调用列表。
 
         依次调用每个工具，自动映射工具名并注入 device_name，
@@ -224,13 +224,13 @@ class ExecutorAgent(BaseAgent):
         Returns:
             工具调用结果列表
         """
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
 
         for action in tool_actions:
             raw_name: str = action.get('tool', '')
             # 映射工具名：LLM 可能使用 mobile_tap 等非标准名，需转为 MCP 注册名
             tool_name: str = self.TOOL_NAME_MAP.get(raw_name, raw_name)
-            params: Dict[str, Any] = action.get('params', {})
+            params: dict[str, Any] = action.get('params', {})
 
             if not tool_name:
                 continue
@@ -263,7 +263,7 @@ class ExecutorAgent(BaseAgent):
                 else:
                     error_msg = result.get('data', {}).get('message', '未知错误') if isinstance(result, dict) else '未知错误'
                     logger.warning(f"[ExecutorAgent] MCP 工具 {tool_name} 返回失败: {error_msg}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 results.append({
                     'tool': tool_name,
                     'params': params,
@@ -276,7 +276,7 @@ class ExecutorAgent(BaseAgent):
         return results
 
     def _get_actual_result(
-        self, mcp_calls: List[Dict], action_result: Dict
+        self, mcp_calls: list[dict], action_result: dict
     ) -> str:
         """基于 MCP 实际调用结果生成执行结果描述。
 
@@ -319,7 +319,7 @@ class ExecutorAgent(BaseAgent):
 
     def _infer_tool_calls(
         self, action_performed: str, current_step: str, device_name: str = ''
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """从操作描述推断 MCP 工具调用。
 
         当 LLM 没有返回明确的 tool_actions 时，从步骤描述中推断。
@@ -339,7 +339,7 @@ class ExecutorAgent(BaseAgent):
         Returns:
             推断的工具调用列表
         """
-        calls: List[Dict[str, Any]] = []
+        calls: list[dict[str, Any]] = []
         step_lower = current_step.lower()
 
         # 从步骤描述中提取定位参数
@@ -373,7 +373,7 @@ class ExecutorAgent(BaseAgent):
 
         return calls
 
-    def _extract_locator_from_step(self, step: str) -> Dict[str, str]:
+    def _extract_locator_from_step(self, step: str) -> dict[str, str]:
         """从步骤描述中提取元素定位参数。
 
         按优先级解析步骤描述中的定位信息：
@@ -456,7 +456,7 @@ class ExecutorAgent(BaseAgent):
 
         return ''
 
-    def _parse_json_response(self, response: str, fallback: Dict[str, Any]) -> Dict[str, Any]:
+    def _parse_json_response(self, response: str, fallback: dict[str, Any]) -> dict[str, Any]:
         """解析 LLM 返回的 JSON 格式响应。
 
         Args:

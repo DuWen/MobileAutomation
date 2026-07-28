@@ -6,10 +6,10 @@ MCP Server 测试模块
 """
 
 import base64
-
-from unittest.mock import MagicMock, patch
-from PIL import Image
 from io import BytesIO
+from unittest.mock import MagicMock, patch
+
+from PIL import Image
 
 
 def _create_valid_screenshot_b64(width: int = 1080, height: int = 2400) -> str:
@@ -130,8 +130,10 @@ class TestDeviceManager:
         dm = DeviceManager()
         mock_driver = _create_mock_driver()
 
-        with patch("src.mobile_mcp.tools.device.webdriver.Remote", return_value=mock_driver):
-            result = dm.connect_device("emulator-5554")
+        with patch("src.mobile_mcp.tools.device.webdriver.Remote", return_value=mock_driver), \
+             patch.object(dm, "_is_appium_running", return_value=True), \
+             patch.object(dm, "_kill_uiautomator2"):
+            result = dm.connect_device(platform="Android", device_name="emulator-5554")
 
         assert result["success"] is True
         assert "连接成功" in result["data"]["message"]
@@ -143,9 +145,11 @@ class TestDeviceManager:
         dm = DeviceManager()
         mock_driver = _create_mock_driver()
 
-        with patch("src.mobile_mcp.tools.device.webdriver.Remote", return_value=mock_driver):
-            dm.connect_device("emulator-5554")
-            result = dm.connect_device("emulator-5554")
+        with patch("src.mobile_mcp.tools.device.webdriver.Remote", return_value=mock_driver), \
+             patch.object(dm, "_is_appium_running", return_value=True), \
+             patch.object(dm, "_kill_uiautomator2"):
+            dm.connect_device(platform="Android", device_name="emulator-5554")
+            result = dm.connect_device(platform="Android", device_name="emulator-5554")
 
         assert result["success"] is True
         assert "已存在连接" in result["data"]["message"]
@@ -156,8 +160,10 @@ class TestDeviceManager:
 
         dm = DeviceManager()
 
-        with patch("src.mobile_mcp.tools.device.webdriver.Remote", side_effect=Exception("Connection refused")):
-            result = dm.connect_device("bad_device")
+        with patch("src.mobile_mcp.tools.device.webdriver.Remote", side_effect=Exception("Connection refused")), \
+             patch.object(dm, "_is_appium_running", return_value=True), \
+             patch.object(dm, "_kill_uiautomator2"):
+            result = dm.connect_device(platform="Android", device_name="bad_device")
 
         assert result["success"] is False
         assert "Connection refused" in result["data"]["error"]
@@ -169,8 +175,10 @@ class TestDeviceManager:
         dm = DeviceManager()
         mock_driver = _create_mock_driver()
 
-        with patch("src.mobile_mcp.tools.device.webdriver.Remote", return_value=mock_driver):
-            dm.connect_device("emulator-5554")
+        with patch("src.mobile_mcp.tools.device.webdriver.Remote", return_value=mock_driver), \
+             patch.object(dm, "_is_appium_running", return_value=True), \
+             patch.object(dm, "_kill_uiautomator2"):
+            dm.connect_device(platform="Android", device_name="emulator-5554")
             result = dm.disconnect_device("emulator-5554")
 
         assert result["success"] is True
@@ -193,8 +201,10 @@ class TestDeviceManager:
         dm = DeviceManager()
         mock_driver = _create_mock_driver()
 
-        with patch("src.mobile_mcp.tools.device.webdriver.Remote", return_value=mock_driver):
-            dm.connect_device("emulator-5554")
+        with patch("src.mobile_mcp.tools.device.webdriver.Remote", return_value=mock_driver), \
+             patch.object(dm, "_is_appium_running", return_value=True), \
+             patch.object(dm, "_kill_uiautomator2"):
+            dm.connect_device(platform="Android", device_name="emulator-5554")
             result = dm.get_device_info("emulator-5554")
 
         assert result["success"] is True
@@ -257,9 +267,11 @@ class TestDeviceManager:
         dm = DeviceManager()
         mock_driver = _create_mock_driver()
 
-        with patch("src.mobile_mcp.tools.device.webdriver.Remote", return_value=mock_driver):
-            dm.connect_device("dev1")
-            dm.connect_device("dev2")
+        with patch("src.mobile_mcp.tools.device.webdriver.Remote", return_value=mock_driver), \
+             patch.object(dm, "_is_appium_running", return_value=True), \
+             patch.object(dm, "_kill_uiautomator2"):
+            dm.connect_device(platform="Android", device_name="dev1")
+            dm.connect_device(platform="Android", device_name="dev2")
             result = dm.disconnect_all()
 
         assert result["success"] is True
@@ -275,8 +287,8 @@ class TestUIToolkit:
 
     def _setup_toolkit(self):
         """创建带 mock driver 的 UIToolkit 实例。"""
-        from src.mobile_mcp.tools.ui import UIToolkit
         from src.mobile_mcp.tools.device import DeviceManager
+        from src.mobile_mcp.tools.ui import UIToolkit
 
         dm = DeviceManager()
         mock_driver = _create_mock_driver()
@@ -285,16 +297,19 @@ class TestUIToolkit:
         return toolkit, mock_driver
 
     def test_tap_element_success(self):
-        """测试点击坐标操作"""
+        """测试通过定位策略点击元素"""
         toolkit, mock_driver = self._setup_toolkit()
-        result = toolkit.tap_element("test_device", 540, 1200)
+        mock_element = MagicMock()
+        mock_driver.find_element.return_value = mock_element
+
+        result = toolkit.tap_element("test_device", by="id", value="btn_login")
         assert result["success"] is True
-        mock_driver.execute_script.assert_called_once()
+        mock_element.click.assert_called_once()
 
     def test_tap_element_device_not_connected(self):
         """测试点击未连接设备"""
-        from src.mobile_mcp.tools.ui import UIToolkit
         from src.mobile_mcp.tools.device import DeviceManager
+        from src.mobile_mcp.tools.ui import UIToolkit
 
         dm = DeviceManager()
         toolkit = UIToolkit(dm)
@@ -321,12 +336,12 @@ class TestUIToolkit:
         assert result["success"] is False
 
     def test_input_text_success(self):
-        """测试输入文本操作"""
+        """测试向元素输入文本"""
         toolkit, mock_driver = self._setup_toolkit()
         mock_element = MagicMock()
         mock_driver.find_element.return_value = mock_element
 
-        result = toolkit.input_text("test_device", "username_field", "testuser")
+        result = toolkit.input_text("test_device", by="id", value="username_field", text="testuser")
         assert result["success"] is True
         mock_element.clear.assert_called_once()
         mock_element.send_keys.assert_called_once_with("testuser")
@@ -334,16 +349,28 @@ class TestUIToolkit:
     def test_swipe_success(self):
         """测试滑动操作"""
         toolkit, mock_driver = self._setup_toolkit()
+        mock_driver.execute_script.reset_mock()
         result = toolkit.swipe("test_device", 540, 2000, 540, 500)
         assert result["success"] is True
-        mock_driver.execute_script.assert_called_once()
+        # ensure_connected() 会先调用 getDeviceTime 做健康检查，再调用实际手势
+        assert mock_driver.execute_script.call_count == 2
+        mock_driver.execute_script.assert_called_with(
+            "mobile: swipeGesture",
+            {"left": 540, "top": 2000, "width": 0, "height": -1500, "duration": 500, "direction": "custom"},
+        )
 
     def test_long_press_success(self):
         """测试长按操作"""
         toolkit, mock_driver = self._setup_toolkit()
+        mock_driver.execute_script.reset_mock()
         result = toolkit.long_press("test_device", 540, 1200, duration=1500)
         assert result["success"] is True
-        mock_driver.execute_script.assert_called_once()
+        # ensure_connected() 会先调用 getDeviceTime 做健康检查，再调用实际手势
+        assert mock_driver.execute_script.call_count == 2
+        mock_driver.execute_script.assert_called_with(
+            "mobile: longClickGesture",
+            {"x": 540, "y": 1200, "duration": 1500},
+        )
 
     def test_press_key_back(self):
         """测试按下返回键"""
@@ -369,9 +396,15 @@ class TestUIToolkit:
     def test_scroll_down(self):
         """测试向下滚动"""
         toolkit, mock_driver = self._setup_toolkit()
+        mock_driver.execute_script.reset_mock()
         result = toolkit.scroll("test_device", "down", 0.5)
         assert result["success"] is True
-        mock_driver.execute_script.assert_called_once()
+        # ensure_connected() 会先调用 getDeviceTime 做健康检查，再调用实际手势
+        assert mock_driver.execute_script.call_count == 2
+        mock_driver.execute_script.assert_called_with(
+            "mobile: scrollGesture",
+            {"direction": "down", "percent": 0.5},
+        )
 
     def test_scroll_invalid_direction(self):
         """测试无效的滚动方向"""
@@ -411,8 +444,8 @@ class TestVisionToolkit:
 
     def _setup_toolkit(self):
         """创建带 mock driver 的 VisionToolkit 实例。"""
-        from src.mobile_mcp.tools.vision import VisionToolkit
         from src.mobile_mcp.tools.device import DeviceManager
+        from src.mobile_mcp.tools.vision import VisionToolkit
 
         dm = DeviceManager()
         mock_driver = _create_mock_driver()
@@ -434,8 +467,8 @@ class TestVisionToolkit:
 
     def test_take_screenshot_device_not_connected(self):
         """测试未连接设备截图"""
-        from src.mobile_mcp.tools.vision import VisionToolkit
         from src.mobile_mcp.tools.device import DeviceManager
+        from src.mobile_mcp.tools.vision import VisionToolkit
 
         dm = DeviceManager()
         toolkit = VisionToolkit(dm)
@@ -575,8 +608,8 @@ class TestErrorHandling:
 
     def test_ui_toolkit_device_not_connected(self):
         """测试 UI 操作时设备未连接"""
-        from src.mobile_mcp.tools.ui import UIToolkit
         from src.mobile_mcp.tools.device import DeviceManager
+        from src.mobile_mcp.tools.ui import UIToolkit
 
         dm = DeviceManager()
         toolkit = UIToolkit(dm)
@@ -585,8 +618,8 @@ class TestErrorHandling:
 
     def test_vision_toolkit_device_not_connected(self):
         """测试视觉操作时设备未连接"""
-        from src.mobile_mcp.tools.vision import VisionToolkit
         from src.mobile_mcp.tools.device import DeviceManager
+        from src.mobile_mcp.tools.vision import VisionToolkit
 
         dm = DeviceManager()
         toolkit = VisionToolkit(dm)
@@ -605,8 +638,8 @@ class TestErrorHandling:
 
     def test_input_text_missing_selector_value(self):
         """测试 wait_for_element 缺少 value 字段"""
-        from src.mobile_mcp.tools.ui import UIToolkit
         from src.mobile_mcp.tools.device import DeviceManager
+        from src.mobile_mcp.tools.ui import UIToolkit
 
         dm = DeviceManager()
         mock_driver = _create_mock_driver()

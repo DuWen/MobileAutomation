@@ -9,12 +9,12 @@ AgentState 定义模块。
 from __future__ import annotations
 
 import operator
-from typing import Annotated, List, Optional, TypedDict
+from typing import Annotated, TypedDict
 
 from langgraph.graph.message import add_messages
 
 
-def replace_if_non_empty(old: List, new: List) -> List:
+def replace_if_non_empty(old: list, new: list) -> list:
     """列表 reducer：新值非空 list 时整体替换，否则保留原值。
 
     用于 test_plan 字段，支持重新规划场景下整体替换测试计划。
@@ -53,18 +53,18 @@ class AgentState(TypedDict):
     current_screen: str
     """当前屏幕的文本描述（由 Explorer 节点生成）。"""
 
-    ui_tree: Optional[str]
+    ui_tree: str | None
     """当前设备界面的无障碍树（Accessibility Tree）JSON 字符串。"""
 
-    screenshot_b64: Optional[str]
+    screenshot_b64: str | None
     """当前设备截图的 Base64 编码字符串。"""
 
     # ── 测试计划与执行 ────────────────────────────────────────────
-    test_plan: Annotated[List[dict], replace_if_non_empty]
+    test_plan: Annotated[list[dict], replace_if_non_empty]
     """测试步骤计划列表，每个元素包含 action/target/value/expected 等字段。
     使用 replace_if_non_empty reducer，支持重新规划时整体替换计划。"""
 
-    executed_steps: Annotated[List[dict], operator.add]
+    executed_steps: Annotated[list[dict], operator.add]
     """已执行步骤列表，每个元素包含 step, action, result, screenshot, passed 等字段。"""
 
     current_step_index: int
@@ -103,10 +103,10 @@ class AgentState(TypedDict):
     perception_mode: str
     """感知模式：ui_tree / screenshot / hybrid，默认 hybrid。"""
 
-    matched_skills: Optional[list]
+    matched_skills: list | None
     """与测试目标匹配的 Skill 知识列表，由 Explorer 节点匹配并注入。"""
 
-    skill_context: Optional[str]
+    skill_context: str | None
     """格式化后的 Skill 知识文本，注入到后续节点的系统提示词中。"""
 
     total_tokens_used: int

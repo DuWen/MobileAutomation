@@ -5,12 +5,10 @@
 """
 
 import re
-from typing import Dict, List, Tuple
-
 
 # 敏感信息脱敏规则列表
 # 每项为 (正则表达式模式, 替换模板)
-_REDACT_RULES: List[Tuple[re.Pattern, str]] = [
+_REDACT_RULES: list[tuple[re.Pattern, str]] = [
     # 手机号（中国大陆）：11位数字，可带 +86 前缀
     (re.compile(r'(?:(?:\+?86)?1[3-9]\d{9})(?!\d)'), '***手机号***'),
     # 邮箱地址
@@ -66,7 +64,7 @@ def redact_sensitive(text: str) -> str:
     return result
 
 
-def redact_dict(data: Dict, keys_to_redact: List[str] | None = None) -> Dict:
+def redact_dict(data: dict, keys_to_redact: list[str] | None = None) -> dict:
     """对字典中指定键的值进行脱敏处理。
 
     递归遍历字典，对指定键名（或所有常见敏感键名）的值进行脱敏。
@@ -91,7 +89,7 @@ def redact_dict(data: Dict, keys_to_redact: List[str] | None = None) -> Dict:
         'auth_token', 'private_key', 'secret_key',
     ]
 
-    result: Dict = {}
+    result: dict = {}
     for key, value in data.items():
         # 检查当前键是否敏感键名
         if isinstance(key, str) and key.lower() in [k.lower() for k in sensitive_keys]:

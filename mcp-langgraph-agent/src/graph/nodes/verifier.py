@@ -8,11 +8,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
-from src.graph.state import AgentState
-from src.agents.verifier import VerifierAgent
 from src.agents.llm import ModelRouter
+from src.agents.verifier import VerifierAgent
+from src.graph.state import AgentState
 from src.utils.token_tracker import TokenTracker
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ def get_verifier_agent(
     return _verifier_agent
 
 
-async def verifier_node(state: AgentState) -> Dict[str, Any]:
+async def verifier_node(state: AgentState) -> dict[str, Any]:
     """验证节点的主函数。
 
     调用 VerifierAgent 验证上一步执行结果，并根据验证结果更新步骤索引和重试计数：
@@ -70,7 +70,7 @@ async def verifier_node(state: AgentState) -> Dict[str, Any]:
             - messages: 新增的对话消息
             - total_tokens_used: 本轮消耗的 Token 数
     """
-    executed_steps: List[dict] = state.get('executed_steps', [])
+    executed_steps: list[dict] = state.get('executed_steps', [])
 
     # 边界检查
     if not executed_steps:
@@ -164,11 +164,11 @@ async def verifier_node(state: AgentState) -> Dict[str, Any]:
                 if isinstance(sc_result, dict) and sc_result.get('success', False):
                     fresh_screenshot_b64 = sc_result.get('data', {}).get('screenshot', fresh_screenshot_b64)
                     logger.info("[Verifier] 已获取最新截图用于验证")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"[Verifier] 获取最新 UI 数据失败，使用旧数据: {e}")
 
     # 调用 Agent 执行验证
-    verify_result: Dict[str, Any] = await agent.run(
+    verify_result: dict[str, Any] = await agent.run(
         execution_record=last_execution,
         ui_tree=fresh_ui_tree,
         screenshot_b64=fresh_screenshot_b64,
@@ -198,7 +198,7 @@ async def verifier_node(state: AgentState) -> Dict[str, Any]:
         )
 
     # 获取本轮 Token 消耗
-    token_summary: Dict[str, Any] = agent.get_token_summary()
+    token_summary: dict[str, Any] = agent.get_token_summary()
     tokens_used: int = token_summary.get('total_tokens', 0)
 
     logger.info(

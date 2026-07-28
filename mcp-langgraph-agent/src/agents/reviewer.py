@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from src.agents.base import BaseAgent
 from src.agents.llm import ModelRouter
@@ -47,7 +47,7 @@ class ReviewerAgent(BaseAgent):
             token_tracker=token_tracker,
         )
 
-    async def run(self, **kwargs: Any) -> Dict[str, Any]:
+    async def run(self, **kwargs: Any) -> dict[str, Any]:
         """运行审查 Agent 的核心逻辑。
 
         综合分析整个测试流程的执行记录和验证结果，给出最终审查结论。
@@ -106,7 +106,7 @@ class ReviewerAgent(BaseAgent):
         )
 
         # 解析 LLM 返回的审查结果
-        review_result: Dict[str, Any] = self._parse_json_response(
+        review_result: dict[str, Any] = self._parse_json_response(
             response,
             fallback=self._generate_fallback_review(
                 test_goal, total_steps, completed_steps, executed_steps
@@ -135,7 +135,7 @@ class ReviewerAgent(BaseAgent):
         feedback: str = review_result.get('summary', '审查完成')
 
         # 计算质量指标
-        quality_metrics: Dict[str, Any] = self._calculate_quality_metrics(
+        quality_metrics: dict[str, Any] = self._calculate_quality_metrics(
             executed_steps, total_steps
         )
 
@@ -159,7 +159,7 @@ class ReviewerAgent(BaseAgent):
         self,
         executed_steps: list,
         total_steps: int,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """计算测试质量指标。
 
         综合执行数据，计算成功率、通过率等指标。
@@ -193,7 +193,7 @@ class ReviewerAgent(BaseAgent):
         total_steps: int,
         completed_steps: int,
         executed_steps: list,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """生成 fallback 审查结果。
 
         当 LLM 返回无法解析时使用，基于执行数据直接判断。
@@ -239,7 +239,7 @@ class ReviewerAgent(BaseAgent):
             'final_verdict': final_verdict,
         }
 
-    def _parse_json_response(self, response: str, fallback: Dict[str, Any]) -> Dict[str, Any]:
+    def _parse_json_response(self, response: str, fallback: dict[str, Any]) -> dict[str, Any]:
         """解析 LLM 返回的 JSON 格式响应。
 
         Args:

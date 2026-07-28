@@ -10,7 +10,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -89,7 +89,7 @@ class BenchmarkRunner:
         """
         self._data_dir = Path(data_dir)
         self._data_dir.mkdir(parents=True, exist_ok=True)
-        self._history: List[BenchmarkResult] = []
+        self._history: list[BenchmarkResult] = []
         self._load_history()
 
     def record_benchmark(
@@ -148,7 +148,7 @@ class BenchmarkRunner:
         )
         return result
 
-    def get_summary(self, last_n: int = 0) -> Dict[str, Any]:
+    def get_summary(self, last_n: int = 0) -> dict[str, Any]:
         """获取基准统计摘要。
 
         计算历史记录的各项指标的统计值（均值、最值等）。
@@ -195,7 +195,7 @@ class BenchmarkRunner:
         self,
         result: BenchmarkResult,
         baseline_last_n: int = 5,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """将结果与历史基准对比分析。
 
         计算当前结果与历史均值之间的偏差百分比。
@@ -266,7 +266,7 @@ class BenchmarkRunner:
             return
 
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
+            with open(filepath, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -288,5 +288,5 @@ class BenchmarkRunner:
                         timestamp=data.get("timestamp", 0),
                     ))
             logger.info("[Benchmark] 已加载 %d 条历史记录", len(self._history))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("[Benchmark] 加载历史记录失败: %s", e)

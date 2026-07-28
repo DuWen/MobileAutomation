@@ -9,11 +9,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
-from src.graph.state import AgentState
 from src.agents.explorer import ExplorerAgent
 from src.agents.llm import ModelRouter
+from src.graph.state import AgentState
 from src.skills.manager import SkillManager
 from src.utils.perception import HybridPerception, PerceptionMode
 from src.utils.token_tracker import TokenTracker
@@ -77,7 +77,7 @@ def get_skill_manager(skills_dir: str | None = None) -> SkillManager:
     return _skill_manager
 
 
-async def explorer_node(state: AgentState) -> Dict[str, Any]:
+async def explorer_node(state: AgentState) -> dict[str, Any]:
     """探索节点的主函数。
 
     调用 ExplorerAgent 分析测试目标和界面状态，
@@ -164,7 +164,7 @@ async def explorer_node(state: AgentState) -> Dict[str, Any]:
                     if isinstance(connect_result, dict) else str(connect_result)
                 )
                 logger.warning(f"[Explorer] 设备 '{device_name}' 连接失败: {error_msg}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"[Explorer] 设备连接异常: {e}")
 
     # 如果两者都缺失且设备已连接，尝试通过 HybridPerception 获取
@@ -190,7 +190,7 @@ async def explorer_node(state: AgentState) -> Dict[str, Any]:
                 f"[Explorer] 混合感知完成: mode={result.mode.value}, "
                 f"ui_tree={result.ui_tree_available}, screenshot={result.screenshot_available}"
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"[Explorer] 混合感知获取失败: {e}")
 
     # ── 3. 注入 Skill 知识到 Agent ─────────────────────────────
@@ -199,7 +199,7 @@ async def explorer_node(state: AgentState) -> Dict[str, Any]:
         agent.set_skill_context(skill_context)
 
     # ── 4. 调用 Agent 执行探索 ─────────────────────────────────
-    exploration_result: Dict[str, Any] = await agent.run(
+    exploration_result: dict[str, Any] = await agent.run(
         test_goal=test_goal,
         ui_tree=ui_tree,
         screenshot_b64=screenshot_b64,
@@ -208,7 +208,7 @@ async def explorer_node(state: AgentState) -> Dict[str, Any]:
     )
 
     # 获取本轮 Token 消耗
-    token_summary: Dict[str, Any] = agent.get_token_summary()
+    token_summary: dict[str, Any] = agent.get_token_summary()
     tokens_used: int = token_summary.get('total_tokens', 0)
 
     logger.info(
@@ -216,7 +216,7 @@ async def explorer_node(state: AgentState) -> Dict[str, Any]:
     )
 
     # 构建返回结果
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         'node_outputs': {
             **state.get('node_outputs', {}),
             'explorer': exploration_result,

@@ -8,8 +8,9 @@
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any
 
 from src.config.settings import settings
 
@@ -20,10 +21,10 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 # LLM 调用返回类型：(模型名称, 响应内容, Token 使用情况)
-LLMResponse = Tuple[str, str, Dict[str, int]]
+LLMResponse = tuple[str, str, dict[str, int]]
 
 # 消息格式：{"role": "system"|"user"|"assistant", "content": "..."}
-Message = Dict[str, str]
+Message = dict[str, str]
 
 
 # ============================================================
@@ -62,7 +63,7 @@ class ModelConfig:
 # light: 用于简单任务（界面元素分析），使用 GPT-4o-mini 或 Claude Haiku
 # standard: 用于标准任务（规划、执行），使用 Claude 3.5 Sonnet
 # precise: 用于精确任务（验证、审查），使用 GPT-4o
-_TIER_CONFIG: Dict[str, ModelConfig] = {
+_TIER_CONFIG: dict[str, ModelConfig] = {
     'light': ModelConfig(
         model_name='gpt-4o-mini',
         provider='openai',
@@ -136,7 +137,7 @@ class OpenAIProvider:
             )
         return self._async_client
 
-    def call(self, model: str, messages: List[Message], **kwargs: Any) -> Dict[str, Any]:
+    def call(self, model: str, messages: list[Message], **kwargs: Any) -> dict[str, Any]:
         """同步调用 OpenAI Chat Completion API。
 
         Args:
@@ -172,7 +173,7 @@ class OpenAIProvider:
             'model': response.model,
         }
 
-    async def call_async(self, model: str, messages: List[Message], **kwargs: Any) -> Dict[str, Any]:
+    async def call_async(self, model: str, messages: list[Message], **kwargs: Any) -> dict[str, Any]:
         """异步调用 OpenAI Chat Completion API。
 
         Args:
@@ -248,7 +249,7 @@ class AnthropicProvider:
         return self._async_client
 
     @staticmethod
-    def _split_system_message(messages: List[Message]) -> Tuple[str, List[Message]]:
+    def _split_system_message(messages: list[Message]) -> tuple[str, list[Message]]:
         """将 system 消息从消息列表中分离。
 
         Anthropic API 要求 system 参数单独传递。
@@ -268,7 +269,7 @@ class AnthropicProvider:
                 non_system.append(m)
         return system_prompt, non_system
 
-    def call(self, model: str, messages: List[Message], **kwargs: Any) -> Dict[str, Any]:
+    def call(self, model: str, messages: list[Message], **kwargs: Any) -> dict[str, Any]:
         """同步调用 Anthropic Messages API。
 
         Args:
@@ -297,7 +298,7 @@ class AnthropicProvider:
             'model': response.model,
         }
 
-    async def call_async(self, model: str, messages: List[Message], **kwargs: Any) -> Dict[str, Any]:
+    async def call_async(self, model: str, messages: list[Message], **kwargs: Any) -> dict[str, Any]:
         """异步调用 Anthropic Messages API。
 
         Args:
@@ -332,7 +333,7 @@ class AnthropicProvider:
 # ============================================================
 
 # Provider 工厂映射
-_PROVIDER_REGISTRY: Dict[str, Callable[[], Any]] = {
+_PROVIDER_REGISTRY: dict[str, Callable[[], Any]] = {
     'openai': lambda: OpenAIProvider(),
     'anthropic': lambda: AnthropicProvider(),
 }
@@ -371,7 +372,7 @@ class ModelRouter:
     当 settings.LLM_MODEL 配置了自定义模型时，所有层级统一使用该模型。
     """
 
-    def __init__(self, provider_overrides: Dict[str, str] | None = None) -> None:
+    def __init__(self, provider_overrides: dict[str, str] | None = None) -> None:
         """初始化模型路由器。
 
         如果 settings 中配置了 LLM_MODEL，则所有层级统一使用该模型，
@@ -382,7 +383,7 @@ class ModelRouter:
                 例如 {'light': 'anthropic'} 将 light 层级改为使用 Anthropic。
         """
         # 初始化 Provider 实例缓存
-        self._providers: Dict[str, Any] = {}
+        self._providers: dict[str, Any] = {}
 
         # 应用 Provider 覆盖配置
         if provider_overrides:
@@ -422,7 +423,7 @@ class ModelRouter:
 
     def call(
         self,
-        messages: List[Message],
+        messages: list[Message],
         tier: str = 'standard',
     ) -> LLMResponse:
         """同步调用 LLM。
@@ -457,7 +458,7 @@ class ModelRouter:
                     temperature=config.temperature,
                 )
                 return self._parse_response(response, config.provider, config.model_name)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 last_error = e
                 logger.warning(f"[ModelRouter] LLM 调用失败 (attempt {attempt + 1}/{config.retry_count + 1}): {e}")
                 if attempt < config.retry_count:
@@ -467,7 +468,7 @@ class ModelRouter:
 
     async def call_async(
         self,
-        messages: List[Message],
+        messages: list[Message],
         tier: str = 'standard',
     ) -> LLMResponse:
         """异步调用 LLM。
@@ -501,7 +502,7 @@ class ModelRouter:
                     temperature=config.temperature,
                 )
                 return self._parse_response(response, config.provider, config.model_name)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 last_error = e
                 logger.warning(f"[ModelRouter] 异步 LLM 调用失败 (attempt {attempt + 1}/{config.retry_count + 1}): {e}")
                 if attempt < config.retry_count:
@@ -511,7 +512,7 @@ class ModelRouter:
 
     def _parse_response(
         self,
-        response: Dict[str, Any],
+        response: dict[str, Any],
         provider: str,
         model_name: str,
     ) -> LLMResponse:
@@ -528,7 +529,7 @@ class ModelRouter:
             (模型名称, 响应内容, Token 使用情况) 的元组
         """
         content: str = ''
-        usage: Dict[str, int] = {}
+        usage: dict[str, int] = {}
 
         if provider == 'openai':
             choices = response.get('choices', [])
@@ -552,7 +553,7 @@ class ModelRouter:
 
         return model_name, content, usage
 
-    def get_available_tiers(self) -> List[str]:
+    def get_available_tiers(self) -> list[str]:
         """获取所有可用的模型层级列表。"""
         return list(_TIER_CONFIG.keys())
 

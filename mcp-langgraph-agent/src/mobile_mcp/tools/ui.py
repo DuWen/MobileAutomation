@@ -7,7 +7,6 @@ UI 交互工具模块
 """
 
 import logging
-from typing import Dict, Optional
 
 from appium.webdriver import WebElement
 from appium.webdriver.common.appiumby import AppiumBy
@@ -24,7 +23,7 @@ from .device import DeviceManager
 logger = logging.getLogger(__name__)
 
 # Android 按键码映射表
-_ANDROID_KEYCODE_MAP: Dict[str, int] = {
+_ANDROID_KEYCODE_MAP: dict[str, int] = {
     "back": 4,
     "home": 3,
     "enter": 66,
@@ -62,7 +61,7 @@ class UIToolkit:
         """
         self._device_manager = device_manager
 
-    def _check_device(self, device_name: str) -> Optional[WebDriver]:
+    def _check_device(self, device_name: str) -> WebDriver | None:
         """检查设备是否已连接并返回 WebDriver 实例。
 
         使用 ensure_connected 替代直接 get_driver，当会话失效时自动重连。
@@ -84,7 +83,7 @@ class UIToolkit:
         by: str,
         value: str,
         use_bounds_fallback: bool = True,
-    ) -> Dict:
+    ) -> dict:
         """通过定位策略查找并点击元素。
 
         支持多种定位策略（id / xpath / accessibility_id / text），
@@ -136,16 +135,16 @@ class UIToolkit:
                 "success": False,
                 "data": {"message": f"未找到元素 [{by}={value}]", "by": by, "value": value},
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             if use_bounds_fallback and by in ("text", "accessibility_id"):
                 return self._tap_by_bounds_fallback(driver, value)
             logger.error("点击 [%s=%s] 失败: %s", by, value, e)
             return {
                 "success": False,
-                "data": {"message": f"点击 [{by}={value}] 失败: {str(e)}", "by": by, "value": value},
+                "data": {"message": f"点击 [{by}={value}] 失败: {e!s}", "by": by, "value": value},
             }
 
-    def _tap_by_bounds_fallback(self, driver: WebDriver, text: str) -> Dict:
+    def _tap_by_bounds_fallback(self, driver: WebDriver, text: str) -> dict:
         """通过文本在 UI 树中查找 bounds，执行坐标点击（降级方案）。
 
         当策略定位失败时，从 page_source 的 XML 中解析包含目标文本的
@@ -176,15 +175,15 @@ class UIToolkit:
                 "success": False,
                 "data": {"message": f"文本 [{text}] 未在 UI 树中找到", "text": text},
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return {
                 "success": False,
-                "data": {"message": f"坐标降级点击失败: {str(e)}", "text": text},
+                "data": {"message": f"坐标降级点击失败: {e!s}", "text": text},
             }
 
     def tap_by_text(
         self, device_name: str, text: str
-    ) -> Dict:
+    ) -> dict:
         """通过文本内容查找元素并点击。
 
         使用 xpath 或 accessibility_id 定位包含指定文本的元素，
@@ -214,11 +213,11 @@ class UIToolkit:
                 "success": True,
                 "data": {"message": f"点击文本 '{text}' 成功", "text": text},
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("点击文本 '%s' 失败: %s", text, e)
             return {
                 "success": False,
-                "data": {"message": f"点击文本 '{text}' 失败: {str(e)}", "text": text, "error": str(e)},
+                "data": {"message": f"点击文本 '{text}' 失败: {e!s}", "text": text, "error": str(e)},
             }
 
     def input_text(
@@ -227,7 +226,7 @@ class UIToolkit:
         by: str,
         value: str,
         text: str,
-    ) -> Dict:
+    ) -> dict:
         """向指定元素输入文本内容。
 
         先通过定位策略找到元素，清除现有文本，再输入目标文本。
@@ -282,11 +281,11 @@ class UIToolkit:
                 "success": False,
                 "data": {"message": f"未找到元素 [{by}={value}]", "by": by, "value": value},
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("向元素 [%s=%s] 输入文本失败: %s", by, value, e)
             return {
                 "success": False,
-                "data": {"message": f"向元素 [{by}={value}] 输入文本失败: {str(e)}", "by": by, "value": value, "error": str(e)},
+                "data": {"message": f"向元素 [{by}={value}] 输入文本失败: {e!s}", "by": by, "value": value, "error": str(e)},
             }
 
     def swipe(
@@ -297,7 +296,7 @@ class UIToolkit:
         end_x: int,
         end_y: int,
         duration: int = 500,
-    ) -> Dict:
+    ) -> dict:
         """在设备屏幕上执行滑动操作。
 
         从起始坐标 (start_x, start_y) 滑动到结束坐标 (end_x, end_y)，
@@ -340,12 +339,12 @@ class UIToolkit:
                     "duration": duration,
                 },
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("滑动操作失败: %s", e)
             return {
                 "success": False,
                 "data": {
-                    "message": f"滑动操作失败: {str(e)}",
+                    "message": f"滑动操作失败: {e!s}",
                     "start_x": start_x, "start_y": start_y,
                     "end_x": end_x, "end_y": end_y,
                     "error": str(e),
@@ -354,7 +353,7 @@ class UIToolkit:
 
     def long_press(
         self, device_name: str, x: int, y: int, duration: int = 1000
-    ) -> Dict:
+    ) -> dict:
         """在指定坐标位置执行长按操作。
 
         通过 Appium 的 mobile: longClickGesture 执行长按，
@@ -382,14 +381,14 @@ class UIToolkit:
                 "success": True,
                 "data": {"message": f"在坐标 ({x}, {y}) 执行长按成功", "x": x, "y": y, "duration": duration},
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("长按坐标 (%d, %d) 失败: %s", x, y, e)
             return {
                 "success": False,
-                "data": {"message": f"长按坐标 ({x}, {y}) 失败: {str(e)}", "x": x, "y": y, "error": str(e)},
+                "data": {"message": f"长按坐标 ({x}, {y}) 失败: {e!s}", "x": x, "y": y, "error": str(e)},
             }
 
-    def press_key(self, device_name: str, key_name: str) -> Dict:
+    def press_key(self, device_name: str, key_name: str) -> dict:
         """按下设备物理或系统按键。
 
         支持常见的 Android 系统按键（back、home、enter 等），
@@ -422,16 +421,16 @@ class UIToolkit:
                 "success": True,
                 "data": {"message": f"按键 '{key_name}' 按下成功", "key_name": key_name, "keycode": keycode},
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("按键 '%s' 按下失败: %s", key_name, e)
             return {
                 "success": False,
-                "data": {"message": f"按键 '{key_name}' 按下失败: {str(e)}", "key_name": key_name, "error": str(e)},
+                "data": {"message": f"按键 '{key_name}' 按下失败: {e!s}", "key_name": key_name, "error": str(e)},
             }
 
     def scroll(
         self, device_name: str, direction: str = "down", distance: float = 0.5
-    ) -> Dict:
+    ) -> dict:
         """在设备屏幕上执行方向滚动操作。
 
         通过 Appium 的 mobile: scrollGesture 实现方向滚动，
@@ -471,19 +470,19 @@ class UIToolkit:
                 "success": True,
                 "data": {"message": f"向 {direction} 方向滚动成功", "direction": direction, "distance": distance},
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("滚动操作失败: %s", e)
             return {
                 "success": False,
-                "data": {"message": f"滚动操作失败: {str(e)}", "direction": direction, "error": str(e)},
+                "data": {"message": f"滚动操作失败: {e!s}", "direction": direction, "error": str(e)},
             }
 
     def wait_for_element(
         self,
         device_name: str,
-        selector: Dict,
+        selector: dict,
         timeout: int = 10,
-    ) -> Dict:
+    ) -> dict:
         """等待指定元素出现。
 
         使用 WebDriverWait 实现显式等待，直到元素在 DOM 中可见。
@@ -526,15 +525,15 @@ class UIToolkit:
                 "success": False,
                 "data": {"message": f"等待元素超时（{timeout} 秒）", "selector": selector, "timeout": timeout},
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return {
                 "success": False,
-                "data": {"message": f"等待元素失败: {str(e)}", "selector": selector, "error": str(e)},
+                "data": {"message": f"等待元素失败: {e!s}", "selector": selector, "error": str(e)},
             }
 
     def _find_element(
         self, driver: WebDriver, element_id: str
-    ) -> Optional[WebElement]:
+    ) -> WebElement | None:
         """内部方法：通过多种定位策略查找元素。
 
         按照 accessibility_id -> xpath -> class_name 的顺序依次尝试定位。
@@ -564,7 +563,7 @@ class UIToolkit:
 
     def _find_element_by_text(
         self, driver: WebDriver, text: str
-    ) -> Optional[WebElement]:
+    ) -> WebElement | None:
         """内部方法：通过文本内容查找元素。
 
         使用多种 xpath 策略匹配文本，包括完全匹配和包含匹配。
@@ -614,7 +613,7 @@ class UIToolkit:
         }
         return strategy_map.get(strategy.lower(), AppiumBy.XPATH)
 
-    def _get_element_info(self, element: WebElement) -> Dict:
+    def _get_element_info(self, element: WebElement) -> dict:
         """内部方法：获取元素的详细信息。
 
         Args:
@@ -634,7 +633,7 @@ class UIToolkit:
                 "is_selected": element.is_selected(),
                 "content_desc": element.get_attribute("content-desc"),
             }
-        except Exception:
+        except Exception:  # noqa: BLE001
             return {
                 "tag": "未知",
                 "text": "",

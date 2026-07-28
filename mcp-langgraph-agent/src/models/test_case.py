@@ -4,8 +4,8 @@
 定义测试用例和测试步骤的数据模型，用于描述移动端自动化测试的测试场景。
 """
 
-from typing import List, Optional
 from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -33,8 +33,8 @@ class TestCase(BaseModel):
     name: str = Field(..., description="测试用例名称")
     description: str = Field(default="", description="测试用例描述信息")
     goal: str = Field(..., description="测试用例的测试目标")
-    steps: List[TestStep] = Field(default_factory=list, description="测试步骤列表")
-    tags: List[str] = Field(default_factory=list, description="测试用例标签列表，用于分类和筛选")
+    steps: list[TestStep] = Field(default_factory=list, description="测试步骤列表")
+    tags: list[str] = Field(default_factory=list, description="测试用例标签列表，用于分类和筛选")
     priority: str = Field(default="medium", description="测试用例优先级：high / medium / low")
-    created_at: Optional[datetime] = Field(default=None, description="创建时间")
-    updated_at: Optional[datetime] = Field(default=None, description="更新时间")
+    created_at: datetime | None = Field(default=None, description="创建时间")
+    updated_at: datetime | None = Field(default=None, description="更新时间")

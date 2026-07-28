@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import logging
 from enum import Enum
-from typing import Dict
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +87,7 @@ class Notifier:
         pass_rate: str = "",
         total_tokens: int = 0,
         total_cost: float = 0.0,
-    ) -> Dict[str, bool]:
+    ) -> dict[str, bool]:
         """发送测试完成通知。
 
         Args:
@@ -128,7 +127,7 @@ class Notifier:
         test_goal: str,
         error: str,
         duration: float = 0.0,
-    ) -> Dict[str, bool]:
+    ) -> dict[str, bool]:
         """发送测试失败通知。
 
         Args:
@@ -156,7 +155,7 @@ class Notifier:
         total_cost: float,
         threshold: float,
         total_records: int = 0,
-    ) -> Dict[str, bool]:
+    ) -> dict[str, bool]:
         """发送成本告警通知。
 
         Args:
@@ -183,7 +182,7 @@ class Notifier:
         title: str,
         content: str,
         event: NotificationEvent,
-    ) -> Dict[str, bool]:
+    ) -> dict[str, bool]:
         """通过所有已配置的渠道发送通知。
 
         Args:
@@ -194,7 +193,7 @@ class Notifier:
         Returns:
             各渠道发送结果字典
         """
-        results: Dict[str, bool] = {}
+        results: dict[str, bool] = {}
 
         if self._feishu_webhook_url:
             results["feishu"] = self._send_feishu(title, content, event)
@@ -258,7 +257,7 @@ class Notifier:
                     logger.warning("[Notifier] 飞书通知发送失败: %s", result.get("msg", ""))
                     return False
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("[Notifier] 飞书通知发送异常: %s", e)
             return False
 
@@ -310,7 +309,7 @@ class Notifier:
                     logger.warning("[Notifier] Slack 通知发送失败: HTTP %d", resp.status)
                     return False
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("[Notifier] Slack 通知发送异常: %s", e)
             return False
 

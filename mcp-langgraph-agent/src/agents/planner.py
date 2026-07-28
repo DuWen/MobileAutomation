@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from src.agents.base import BaseAgent
 from src.agents.llm import ModelRouter
@@ -47,7 +47,7 @@ class PlannerAgent(BaseAgent):
             token_tracker=token_tracker,
         )
 
-    async def run(self, **kwargs: Any) -> Dict[str, Any]:
+    async def run(self, **kwargs: Any) -> dict[str, Any]:
         """运行规划 Agent 的核心逻辑。
 
         基于探索结果生成详细的测试步骤计划。
@@ -68,7 +68,7 @@ class PlannerAgent(BaseAgent):
         ui_tree: str = kwargs.get('ui_tree', '')
         screenshot_b64: str = kwargs.get('screenshot_b64', '')
         exploration_result: dict = kwargs.get('exploration_result', {})
-        executed_steps: list = kwargs.get('executed_steps', None) or []
+        executed_steps: list = kwargs.get('executed_steps') or []
         is_replan: bool = kwargs.get('is_replan', False)
 
         # 构建消息序列
@@ -106,17 +106,17 @@ class PlannerAgent(BaseAgent):
         )
 
         # 解析 LLM 返回的 JSON 结果
-        plan_result: Dict[str, Any] = self._parse_json_response(
+        plan_result: dict[str, Any] = self._parse_json_response(
             response,
             fallback=self._generate_fallback_plan(test_goal),
         )
 
         # 从规划结果中提取步骤列表
-        test_steps: List[str] = self._extract_steps(plan_result)
-        expected_results: List[str] = plan_result.get('verification_points', [])
+        test_steps: list[str] = self._extract_steps(plan_result)
+        expected_results: list[str] = plan_result.get('verification_points', [])
 
         # 构建结构化测试计划
-        test_plan: Dict[str, Any] = {
+        test_plan: dict[str, Any] = {
             'goal': test_goal,
             'steps': test_steps,
             'expected_results': expected_results,
@@ -133,7 +133,7 @@ class PlannerAgent(BaseAgent):
             'raw_plan': plan_result,
         }
 
-    def _extract_steps(self, plan_result: Dict[str, Any]) -> List[str]:
+    def _extract_steps(self, plan_result: dict[str, Any]) -> list[str]:
         """从规划结果中提取步骤描述列表。
 
         支持多种步骤格式：steps 数组中的 step 对象或纯字符串。
@@ -144,7 +144,7 @@ class PlannerAgent(BaseAgent):
         Returns:
             步骤描述字符串列表
         """
-        steps: List[str] = []
+        steps: list[str] = []
         raw_steps = plan_result.get('steps', [])
 
         for step in raw_steps:
@@ -165,7 +165,7 @@ class PlannerAgent(BaseAgent):
 
         return steps
 
-    def _generate_fallback_plan(self, test_goal: str) -> Dict[str, Any]:
+    def _generate_fallback_plan(self, test_goal: str) -> dict[str, Any]:
         """生成 fallback 测试计划。
 
         当 LLM 返回无法解析时使用，提供基本的测试步骤框架。
@@ -188,7 +188,7 @@ class PlannerAgent(BaseAgent):
             'cleanup': [],
         }
 
-    def _parse_json_response(self, response: str, fallback: Dict[str, Any]) -> Dict[str, Any]:
+    def _parse_json_response(self, response: str, fallback: dict[str, Any]) -> dict[str, Any]:
         """解析 LLM 返回的 JSON 格式响应。
 
         尝试从 LLM 回复中提取 JSON 对象，解析失败时返回 fallback 结果。

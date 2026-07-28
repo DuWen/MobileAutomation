@@ -12,9 +12,8 @@ import os
 import subprocess
 import threading
 from dataclasses import dataclass
-from typing import Dict, Optional
-from urllib.request import urlopen
 from urllib.error import URLError
+from urllib.request import urlopen
 
 from appium import webdriver
 from appium.options.android import UiAutomator2Options
@@ -53,7 +52,7 @@ class DeviceConfig:
     app_package: str = ""
     app_activity: str = ""
     appium_port: int = 4723
-    capabilities: Optional[Dict] = None
+    capabilities: dict | None = None
 
 
 class DeviceManager:
@@ -71,15 +70,15 @@ class DeviceManager:
             appium_url: Appium Server 地址，默认为 "http://localhost:4723"。
         """
         # 设备连接池，key 为设备名称，value 为 WebDriver 实例
-        self._connections: Dict[str, WebDriver] = {}
+        self._connections: dict[str, WebDriver] = {}
         # 线程锁，保证连接池操作的线程安全
         self._lock = threading.Lock()
         # Appium 服务实例（可选，用于自动启动 Appium）
-        self._appium_service: Optional[AppiumService] = None
+        self._appium_service: AppiumService | None = None
         # Appium Server 地址
         self._appium_url = appium_url
         # 设备预配置表，key 为 device_id，value 为 DeviceConfig
-        self._device_configs: Dict[str, DeviceConfig] = {}
+        self._device_configs: dict[str, DeviceConfig] = {}
         # 标记 Appium Server 是否已启动（本次进程内）
         self._appium_started: bool = False
 
@@ -198,7 +197,7 @@ class DeviceManager:
                 logger.info("Appium Server 已通过 AppiumService 启动")
                 self._appium_started = True
                 return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("AppiumService 启动失败: %s，尝试子进程方式", e)
 
         # 方式 2：子进程方式启动
@@ -224,7 +223,7 @@ class DeviceManager:
         except FileNotFoundError:
             logger.error("未找到 appium 命令，请确保已安装: npm install -g appium")
             return False
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Appium Server 子进程启动失败: %s", e)
             return False
 
@@ -239,7 +238,7 @@ class DeviceManager:
         app_package: str = "",
         app_activity: str = "",
         appium_port: int = 4723,
-        capabilities: Optional[Dict] = None,
+        capabilities: dict | None = None,
     ) -> None:
         """注册设备预配置信息。
 
@@ -348,9 +347,9 @@ class DeviceManager:
             try:
                 subprocess.run(
                     ["adb", "-s", udid, "shell", "am", "force-stop", pkg],
-                    capture_output=True, timeout=10,
+                    capture_output=True, timeout=10, check=False,
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
         logger.info("已清理设备 %s 上的残留 UiAutomator2 进程", udid)
 
@@ -361,7 +360,7 @@ class DeviceManager:
         app_package: str = "",
         app_activity: str = "",
         appium_port: int = 4723,
-    ) -> Dict:
+    ) -> dict:
         """连接移动设备并启动指定 App。
 
         通过 Appium WebDriver 建立与设备的连接，支持 Android 和 iOS 设备。
@@ -454,7 +453,7 @@ class DeviceManager:
                     },
                 }
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             error_str = str(e)
             logger.error("连接设备 '%s' 失败: %s", device_name, e)
 
@@ -494,7 +493,7 @@ class DeviceManager:
                                 "device_info": device_info,
                             },
                         }
-                except Exception as retry_e:
+                except Exception as retry_e:  # noqa: BLE001
                     logger.error("设备 '%s' 重连仍失败: %s", device_name, retry_e)
 
             return {
@@ -506,7 +505,7 @@ class DeviceManager:
                 },
             }
 
-    def disconnect_device(self, device_name: str) -> Dict:
+    def disconnect_device(self, device_name: str) -> dict:
         """断开指定名称的设备连接。
 
         从连接池中移除设备，并关闭对应的 WebDriver 会话。
@@ -535,7 +534,7 @@ class DeviceManager:
                 driver = self._connections.pop(device_name)
                 try:
                     driver.quit()
-                except Exception:
+                except Exception:  # noqa: BLE001
                     pass
 
                 logger.info("设备 '%s' 已断开连接", device_name)
@@ -547,17 +546,17 @@ class DeviceManager:
                     },
                 }
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return {
                 "success": False,
                 "data": {
-                    "message": f"断开设备 '{device_name}' 失败: {str(e)}",
+                    "message": f"断开设备 '{device_name}' 失败: {e!s}",
                     "device_name": device_name,
                     "error": str(e),
                 },
             }
 
-    def get_device_info(self, device_name: str) -> Dict:
+    def get_device_info(self, device_name: str) -> dict:
         """获取指定设备的详细信息。
 
         查询当前连接设备的系统信息、屏幕尺寸、平台版本等。
@@ -592,17 +591,17 @@ class DeviceManager:
                     },
                 }
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return {
                 "success": False,
                 "data": {
-                    "message": f"获取设备 '{device_name}' 信息失败: {str(e)}",
+                    "message": f"获取设备 '{device_name}' 信息失败: {e!s}",
                     "device_name": device_name,
                     "error": str(e),
                 },
             }
 
-    def list_devices(self) -> Dict:
+    def list_devices(self) -> dict:
         """列出所有已配置的设备及其连接状态。
 
         返回预配置的设备列表和当前连接池中的设备名称。
@@ -664,7 +663,7 @@ class DeviceManager:
                     driver.session_id[:8],
                 )
                 return False
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
             # 方式2：执行轻量级 Appium 命令验证会话存活
@@ -672,17 +671,17 @@ class DeviceManager:
             try:
                 driver.execute_script("mobile: getDeviceTime")
                 return True
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.info(
                     "会话 %s 执行 mobile:getDeviceTime 失败，判定失效",
                     driver.session_id[:8],
                 )
                 return False
 
-        except Exception:
+        except Exception:  # noqa: BLE001
             return False
 
-    def get_driver(self, device_name: str) -> Optional[WebDriver]:
+    def get_driver(self, device_name: str) -> WebDriver | None:
         """获取指定设备的 WebDriver 实例（含会话健康检查）。
 
         供内部其他模块使用，获取设备驱动以执行 UI 操作。
@@ -704,7 +703,7 @@ class DeviceManager:
                 )
                 try:
                     driver.quit()
-                except Exception:
+                except Exception:  # noqa: BLE001
                     pass
                 self._connections.pop(device_name, None)
                 return None
@@ -717,7 +716,7 @@ class DeviceManager:
         app_package: str = "",
         app_activity: str = "",
         appium_port: int = 4723,
-    ) -> Optional[WebDriver]:
+    ) -> WebDriver | None:
         """确保设备已连接且会话有效，失效时自动重连。
 
         先检查现有会话是否存活，如果失效则清理后重新建立连接。
@@ -758,7 +757,7 @@ class DeviceManager:
             logger.error("设备 '%s' 自动重连失败: %s", device_name, result.get("data", {}).get("message", ""))
             return None
 
-    def _get_device_info_internal(self, driver: WebDriver) -> Dict:
+    def _get_device_info_internal(self, driver: WebDriver) -> dict:
         """内部方法：从 WebDriver 获取设备信息。
 
         Args:
@@ -784,7 +783,7 @@ class DeviceManager:
                 "app_package": driver.capabilities.get("appPackage", ""),
                 "app_activity": driver.capabilities.get("appActivity", ""),
             }
-        except Exception:
+        except Exception:  # noqa: BLE001
             return {
                 "platform": "未知",
                 "platform_version": "未知",
@@ -793,7 +792,7 @@ class DeviceManager:
                 "screen_height": 0,
             }
 
-    def disconnect_all(self) -> Dict:
+    def disconnect_all(self) -> dict:
         """断开所有设备的连接。
 
         遍历连接池，关闭所有 WebDriver 会话并清空连接池。
@@ -807,7 +806,7 @@ class DeviceManager:
                 try:
                     driver = self._connections.pop(name)
                     driver.quit()
-                except Exception:
+                except Exception:  # noqa: BLE001
                     pass
 
             logger.info("已断开所有设备连接，共 %d 个设备", len(device_names))

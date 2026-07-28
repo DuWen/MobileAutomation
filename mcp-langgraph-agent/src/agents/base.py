@@ -5,7 +5,7 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.agents.llm import ModelRouter
 from src.agents.prompts import SYSTEM_PROMPT
@@ -49,11 +49,11 @@ class BaseAgent(ABC):
         self.model_router: ModelRouter = model_router or ModelRouter()
         self.token_tracker: TokenTracker = token_tracker or TokenTracker()
         self.system_prompt: str = SYSTEM_PROMPT
-        self.skill_context: Optional[str] = None
+        self.skill_context: str | None = None
 
     def call_llm(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model_tier: str | None = None,
         operation: str = '',
     ) -> str:
@@ -111,7 +111,7 @@ class BaseAgent(ABC):
 
     async def call_llm_async(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model_tier: str | None = None,
         operation: str = '',
     ) -> str:
@@ -199,7 +199,7 @@ class BaseAgent(ABC):
             return f"{self.system_prompt}\n\n## 相关技能知识（请参考以下知识指导测试行为）\n{self.skill_context}"
         return self.system_prompt
 
-    def get_token_summary(self) -> Dict[str, Any]:
+    def get_token_summary(self) -> dict[str, Any]:
         """获取当前会话的 Token 消耗统计摘要。
 
         Returns:
@@ -208,7 +208,7 @@ class BaseAgent(ABC):
         return self.token_tracker.get_summary()
 
     @abstractmethod
-    def run(self, **kwargs: Any) -> Dict[str, Any]:
+    def run(self, **kwargs: Any) -> dict[str, Any]:
         """运行 Agent 的核心逻辑（抽象方法）。
 
         子类必须实现此方法，定义具体的 Agent 处理逻辑。

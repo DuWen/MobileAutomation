@@ -14,6 +14,8 @@ Phase 1 环境验证脚本
     python scripts/verify_env.py
 """
 
+# ruff: noqa: BLE001, PLW1510, S110
+
 import importlib
 import json
 import os
@@ -22,7 +24,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Tuple
+
 
 # 颜色输出辅助函数
 def _red(text: str) -> str:
@@ -94,7 +96,7 @@ def check_python_version() -> CheckResult:
         )
 
 
-def check_required_packages() -> List[CheckResult]:
+def check_required_packages() -> list[CheckResult]:
     """检查项目必需的 Python 包是否已安装"""
     required_packages = [
         ("fastapi", "FastAPI Web 框架"),
@@ -114,7 +116,7 @@ def check_required_packages() -> List[CheckResult]:
         ("prometheus_client", "Prometheus 监控客户端"),
     ]
 
-    results: List[CheckResult] = []
+    results: list[CheckResult] = []
     for pkg_name, description in required_packages:
         try:
             mod = importlib.import_module(pkg_name)
@@ -281,7 +283,7 @@ def check_ios_env() -> CheckResult:
 def check_connected_devices() -> CheckResult:
     """检查是否有 Android/iOS 设备或模拟器已连接"""
     adb_path = shutil.which("adb")
-    connected_devices: List[str] = []
+    connected_devices: list[str] = []
 
     # Android 设备
     if adb_path:
@@ -335,6 +337,7 @@ def verify_appium_connect_and_get_source() -> CheckResult:
     try:
         from appium import webdriver
         from appium.options.android import UiAutomator2Options
+
         from src.config.settings import settings
     except ImportError as e:
         return CheckResult(
@@ -500,10 +503,12 @@ def verify_config_loading() -> CheckResult:
 def verify_utils_modules() -> CheckResult:
     """验证工具模块能否正常加载"""
     try:
-        from src.utils.xml_compressor import compress_xml
-        from src.utils.screenshot import compress_screenshot  # noqa: F401 - 验证模块可导入
         from src.utils.redact import redact_sensitive
+        from src.utils.screenshot import (
+            compress_screenshot,  # noqa: F401 - 验证模块可导入
+        )
         from src.utils.token_tracker import TokenTracker
+        from src.utils.xml_compressor import compress_xml
 
         # 测试 XML 压缩（使用足够大的 XML 确保压缩生效）
         test_xml = '<hierarchy><node class="android.widget.FrameLayout" bounds="[0,0][1080,2400]"><node class="android.widget.LinearLayout" bounds="[0,0][1080,2400]"><node class="android.widget.Button" text="Login" bounds="[0,0][100,50]" clickable="true" enabled="true"/><node class="android.widget.EditText" text="" bounds="[100,0][500,50]" clickable="true" enabled="true" resource-id="com.example:id/username"/><node class="android.widget.TextView" text="Hello World" bounds="[0,100][1080,200]"/></node></node></hierarchy>'
@@ -535,13 +540,13 @@ def verify_utils_modules() -> CheckResult:
 # 主验证流程
 # ============================================================
 
-def run_all_checks() -> Dict[str, List[CheckResult]]:
+def run_all_checks() -> dict[str, list[CheckResult]]:
     """运行所有环境验证检查
 
     Returns:
         按分类组织的检查结果字典
     """
-    categories: Dict[str, List[CheckResult]] = {}
+    categories: dict[str, list[CheckResult]] = {}
 
     # ── Python 环境 ──
     categories["Python 环境"] = [
@@ -579,7 +584,7 @@ def run_all_checks() -> Dict[str, List[CheckResult]]:
     return categories
 
 
-def print_report(categories: Dict[str, List[CheckResult]]) -> Tuple[int, int]:
+def print_report(categories: dict[str, list[CheckResult]]) -> tuple[int, int]:
     """打印验证报告
 
     Args:
@@ -619,7 +624,7 @@ def print_report(categories: Dict[str, List[CheckResult]]) -> Tuple[int, int]:
     return total_passed, total_failed
 
 
-def save_report_json(categories: Dict[str, List[CheckResult]]) -> None:
+def save_report_json(categories: dict[str, list[CheckResult]]) -> None:
     """将验证报告保存为 JSON 文件
 
     Args:

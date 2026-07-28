@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -51,13 +51,13 @@ class ReportGenerator:
         self,
         task_id: str,
         test_goal: str,
-        executed_steps: List[Dict[str, Any]],
-        verifier_output: Dict[str, Any],
-        reviewer_output: Dict[str, Any],
-        token_summary: Dict[str, Any],
+        executed_steps: list[dict[str, Any]],
+        verifier_output: dict[str, Any],
+        reviewer_output: dict[str, Any],
+        token_summary: dict[str, Any],
         duration: float,
         device_name: str = "",
-        error: Optional[str] = None,
+        error: str | None = None,
         format: str = "html",
     ) -> str:
         """生成测试报告。
@@ -107,13 +107,13 @@ class ReportGenerator:
         self,
         task_id: str,
         test_goal: str,
-        executed_steps: List[Dict[str, Any]],
-        verifier_output: Dict[str, Any],
-        reviewer_output: Dict[str, Any],
-        token_summary: Dict[str, Any],
+        executed_steps: list[dict[str, Any]],
+        verifier_output: dict[str, Any],
+        reviewer_output: dict[str, Any],
+        token_summary: dict[str, Any],
         duration: float,
         device_name: str,
-        error: Optional[str],
+        error: str | None,
     ) -> str:
         """生成 HTML 格式报告。
 
@@ -279,13 +279,13 @@ class ReportGenerator:
         self,
         task_id: str,
         test_goal: str,
-        executed_steps: List[Dict[str, Any]],
-        verifier_output: Dict[str, Any],
-        reviewer_output: Dict[str, Any],
-        token_summary: Dict[str, Any],
+        executed_steps: list[dict[str, Any]],
+        verifier_output: dict[str, Any],
+        reviewer_output: dict[str, Any],
+        token_summary: dict[str, Any],
         duration: float,
         device_name: str,
-        error: Optional[str],
+        error: str | None,
     ) -> str:
         """生成 Markdown 格式报告。
 

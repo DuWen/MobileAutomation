@@ -7,11 +7,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
-from src.graph.state import AgentState
-from src.agents.reviewer import ReviewerAgent
 from src.agents.llm import ModelRouter
+from src.agents.reviewer import ReviewerAgent
+from src.graph.state import AgentState
 from src.utils.token_tracker import TokenTracker
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ def get_reviewer_agent(
     return _reviewer_agent
 
 
-async def reviewer_node(state: AgentState) -> Dict[str, Any]:
+async def reviewer_node(state: AgentState) -> dict[str, Any]:
     """审查节点的主函数。
 
     调用 ReviewerAgent 综合分析整个测试流程，给出最终审查结论。
@@ -109,7 +109,7 @@ async def reviewer_node(state: AgentState) -> Dict[str, Any]:
     agent: ReviewerAgent = get_reviewer_agent()
 
     # 调用 Agent 执行审查
-    review_result: Dict[str, Any] = await agent.run(
+    review_result: dict[str, Any] = await agent.run(
         test_goal=state.get('test_goal', ''),
         test_plan=state.get('test_plan', []),
         executed_steps=state.get('executed_steps', []),
@@ -122,7 +122,7 @@ async def reviewer_node(state: AgentState) -> Dict[str, Any]:
     feedback: str = review_result.get('feedback', '审查完成')
 
     # 获取本轮 Token 消耗
-    token_summary: Dict[str, Any] = agent.get_token_summary()
+    token_summary: dict[str, Any] = agent.get_token_summary()
     tokens_used: int = token_summary.get('total_tokens', 0)
 
     logger.info(f"[Reviewer] 审查完成，结论: {'通过' if passed else '未通过'}")

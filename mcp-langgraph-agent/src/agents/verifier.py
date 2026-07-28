@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from src.agents.base import BaseAgent
 from src.agents.llm import ModelRouter
@@ -47,7 +47,7 @@ class VerifierAgent(BaseAgent):
             token_tracker=token_tracker,
         )
 
-    async def run(self, **kwargs: Any) -> Dict[str, Any]:
+    async def run(self, **kwargs: Any) -> dict[str, Any]:
         """运行验证 Agent 的核心逻辑。
 
         分析执行结果和当前界面状态，判断步骤是否成功。
@@ -107,13 +107,13 @@ class VerifierAgent(BaseAgent):
         )
 
         # 解析 LLM 返回的验证结果
-        verify_result: Dict[str, Any] = self._parse_json_response(
+        verify_result: dict[str, Any] = self._parse_json_response(
             response,
             fallback=self._generate_fallback_verification(execution_record, verification_points),
         )
 
         # 提取验证详情
-        verification_details: List[Dict[str, Any]] = self._extract_verification_details(
+        verification_details: list[dict[str, Any]] = self._extract_verification_details(
             verify_result, execution_record, verification_points
         )
 
@@ -154,10 +154,10 @@ class VerifierAgent(BaseAgent):
 
     def _extract_verification_details(
         self,
-        verify_result: Dict[str, Any],
-        execution_record: Dict[str, Any],
-        verification_points: List[str],
-    ) -> List[Dict[str, Any]]:
+        verify_result: dict[str, Any],
+        execution_record: dict[str, Any],
+        verification_points: list[str],
+    ) -> list[dict[str, Any]]:
         """从验证结果中提取结构化验证详情。
 
         统一不同格式的验证详情为标准格式。
@@ -170,7 +170,7 @@ class VerifierAgent(BaseAgent):
         Returns:
             标准化的验证详情列表
         """
-        details: List[Dict[str, Any]] = []
+        details: list[dict[str, Any]] = []
 
         # 从 LLM 结果中提取详情
         raw_details = verify_result.get('verification_details', [])
@@ -210,9 +210,9 @@ class VerifierAgent(BaseAgent):
 
     def _generate_fallback_verification(
         self,
-        execution_record: Dict[str, Any],
-        verification_points: List[str],
-    ) -> Dict[str, Any]:
+        execution_record: dict[str, Any],
+        verification_points: list[str],
+    ) -> dict[str, Any]:
         """生成 fallback 验证结果。
 
         当 LLM 返回无法解析时使用，基于执行记录中的 passed 字段生成验证结果。
@@ -240,7 +240,7 @@ class VerifierAgent(BaseAgent):
             'suggestions': [] if execution_passed else ['建议重试当前步骤'],
         }
 
-    def _parse_json_response(self, response: str, fallback: Dict[str, Any]) -> Dict[str, Any]:
+    def _parse_json_response(self, response: str, fallback: dict[str, Any]) -> dict[str, Any]:
         """解析 LLM 返回的 JSON 格式响应。
 
         Args:

@@ -7,11 +7,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
-from src.graph.state import AgentState
 from src.agents.executor import ExecutorAgent
 from src.agents.llm import ModelRouter
+from src.graph.state import AgentState
 from src.utils.token_tracker import TokenTracker
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ def get_executor_agent(
     return _executor_agent
 
 
-async def executor_node(state: AgentState) -> Dict[str, Any]:
+async def executor_node(state: AgentState) -> dict[str, Any]:
     """执行节点的主函数。
 
     调用 ExecutorAgent 执行当前测试步骤，通过 MCP 工具操作设备，
@@ -73,7 +73,7 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
             - failure_reason: 执行出错时填充的错误信息
     """
     current_step_index: int = state.get('current_step_index', 0)
-    test_plan: List = state.get('test_plan', [])
+    test_plan: list = state.get('test_plan', [])
 
     # 边界检查
     if current_step_index >= len(test_plan):
@@ -121,11 +121,11 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
             if isinstance(ui_result, dict) and ui_result.get('success', False):
                 fresh_ui_tree = ui_result.get('data', {}).get('tree', fresh_ui_tree)
                 logger.info(f"[Executor] 步骤 [{current_step_index + 1}] 已刷新 UI 树")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"[Executor] 刷新 UI 树失败，使用旧 UI 树: {e}")
 
     # 调用 Agent 执行步骤
-    execution_record: Dict[str, Any] = await agent.run(
+    execution_record: dict[str, Any] = await agent.run(
         current_step=step_desc,
         current_step_index=current_step_index,
         ui_tree=fresh_ui_tree,
@@ -136,7 +136,7 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
     )
 
     # 获取本轮 Token 消耗
-    token_summary: Dict[str, Any] = agent.get_token_summary()
+    token_summary: dict[str, Any] = agent.get_token_summary()
     tokens_used: int = token_summary.get('total_tokens', 0)
 
     logger.info(

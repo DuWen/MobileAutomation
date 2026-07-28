@@ -366,7 +366,7 @@ async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
             )
             task['report_path'] = report_path
             logger.info(f"[Task {task_id}] 测试报告已生成: {report_path}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"[Task {task_id}] 报告生成失败: {e}")
 
         # ── 记录性能基准 ──────────────────────────────────────────
@@ -390,7 +390,7 @@ async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
                 'duration_per_step': bench_result.duration_per_step,
                 'pass_rate': bench_result.pass_rate,
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"[Task {task_id}] 基准记录失败: {e}")
 
         # ── 发送通知 ──────────────────────────────────────────────
@@ -410,10 +410,10 @@ async def run_workflow_task(task_id: str, request: TestRunRequest) -> None:
                     pass_rate=pass_rate_str,
                     total_tokens=token_tracker_summary,
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"[Task {task_id}] 通知发送失败: {e}")
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"[Task {task_id}] 测试执行失败: {e}")
         task['status'] = 'failed'
         task['updated_at'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
@@ -466,7 +466,7 @@ async def init_device_pool() -> None:
         logger.info(f"从配置文件加载了 {len(device_pool)} 台设备")
     except FileNotFoundError:
         logger.warning(f"设备配置文件 {config_path} 未找到")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"设备配置文件加载失败: {e}")
 
     logger.info(f"设备池初始化完成，共 {len(device_pool)} 台设备")
@@ -494,8 +494,8 @@ async def init_langgraph_workflow() -> None:
     构建并编译基于 LangGraph 的自动化测试工作流图，
     同时初始化各节点的 Agent 实例。
     """
-    from src.graph.workflow import get_compiled_graph
     from src.graph.nodes.executor import get_executor_agent
+    from src.graph.workflow import get_compiled_graph
 
     logger.info("LangGraph Workflow 初始化中...")
 
@@ -507,6 +507,7 @@ async def init_langgraph_workflow() -> None:
     # 初始化 MCP Client 并注入到 Executor Agent 和 Explorer 节点
     try:
         import sys
+
         from src.mobile_mcp.client import MCPClient
         # 使用当前 Python 解释器路径，避免 "python" 命令不存在的问题
         python_executable = sys.executable
@@ -520,7 +521,7 @@ async def init_langgraph_workflow() -> None:
         from src.graph.nodes.explorer import set_mcp_client
         set_mcp_client(mcp_client)
         logger.info("MCP Client 已注入到 Executor Agent 和 Explorer 节点")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning(f"MCP Client 初始化失败（将使用模拟模式）: {e}")
 
     logger.info("LangGraph Workflow 初始化完成")
@@ -555,7 +556,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
             if dm._appium_service and dm._appium_service.is_running:
                 dm._appium_service.stop()
                 logger.info("Appium Server 已停止")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning(f"资源清理时出错: {e}")
     device_pool.clear()
     task_store.clear()
@@ -809,7 +810,7 @@ async def get_service_logs(
         }
 
     try:
-        with open(log_file, "r", encoding="utf-8") as f:
+        with open(log_file, encoding="utf-8") as f:
             all_lines = f.readlines()
 
         # 取最后 N 行
@@ -829,7 +830,7 @@ async def get_service_logs(
             "lines": [line.rstrip("\n") for line in recent_lines],
             "total": len(recent_lines),
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"读取日志文件失败: {e}")
 
 
