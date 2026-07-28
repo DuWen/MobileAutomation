@@ -258,8 +258,11 @@ make clean      # 清理缓存
 
 ## 关键设计文档
 
-- [plan-c-mcp-langgraph.html](ai-mobile-test-guide/plan-c-mcp-langgraph.html) —— 完整架构设计方案（**任何架构和接口变更以该文档为准**）
-- [plan-c-design-deployment.html](ai-mobile-test-guide/plan-c-design-deployment.html) —— 设计与部署方案
+设计文档已迁移至 GitHub Wiki，不再纳入主仓库版本控制：
+
+- [plan-c-mcp-langgraph](https://github.com/DuWen/MobileAutomation/wiki/plan‑c‑mcp‑langgraph) —— 完整架构设计方案（**任何架构和接口变更以该文档为准**）
+- [plan-c-design-deployment](https://github.com/DuWen/MobileAutomation/wiki/plan‑c‑design‑deployment) —— 设计与部署方案
+- [ai-mobile-test-guide](https://github.com/DuWen/MobileAutomation/wiki/ai‑mobile‑test‑guide) —— AI 移动端测试指南总览
 
 ## 技术栈
 

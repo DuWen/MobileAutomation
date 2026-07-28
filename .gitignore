@@ -86,3 +86,9 @@ docker-volumes/
 
 # ── LangGraph 检查点 ────────────────────────────────────────────
 .langgraph/
+
+# ── 设计文档（已迁移至 GitHub Wiki，不再纳入主仓库版本控制） ─────
+ai-mobile-test-guide/
+
+# ── TRAE 临时产物 ───────────────────────────────────────────────
+.trae-html-share-packages/
