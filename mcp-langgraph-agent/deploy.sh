@@ -144,6 +144,11 @@ configure_env() {
         touch "$ENV_FILE"
     fi
 
+    # 确保文件末尾有换行符，避免后续追加内容粘连到最后一行
+    if [[ -s "$ENV_FILE" ]] && [[ -n "$(tail -c1 "$ENV_FILE")" ]]; then
+        printf '\n' >> "$ENV_FILE"
+    fi
+
     echo ""
     echo -e "${BOLD}请填写以下关键配置（直接回车使用默认值）:${NC}"
     echo ""
