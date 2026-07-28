@@ -288,7 +288,7 @@ class MobileAutomationServer(FastMCP):
 
         @self.tool(
             name="swipe",
-            description="在设备屏幕上执行滑动操作，从起点滑动到终点",
+            description="在设备屏幕上从指定起点坐标滑动到终点坐标（坐标式滑动）。注意：如果只需要按方向滚动页面（上/下/左/右），请改用 scroll 工具，更简洁。",
         )
         def swipe(
             device_name: str,

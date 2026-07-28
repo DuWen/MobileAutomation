@@ -318,17 +318,9 @@ class UIToolkit:
             return {"success": False, "data": {"message": f"设备 '{device_name}' 未连接"}}
 
         try:
-            driver.execute_script(
-                "mobile: swipeGesture",
-                {
-                    "left": start_x,
-                    "top": start_y,
-                    "width": end_x - start_x,
-                    "height": end_y - start_y,
-                    "duration": duration,
-                    "direction": "custom",
-                },
-            )
+            # 使用 W3C Actions API 的 driver.swipe 进行坐标式滑动
+            # mobile: swipeGesture 只支持 direction+percent（不支持任意坐标），不适合本场景
+            driver.swipe(start_x, start_y, end_x, end_y, duration)
 
             return {
                 "success": True,

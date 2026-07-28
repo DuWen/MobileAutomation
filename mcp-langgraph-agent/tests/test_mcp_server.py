@@ -349,15 +349,11 @@ class TestUIToolkit:
     def test_swipe_success(self):
         """测试滑动操作"""
         toolkit, mock_driver = self._setup_toolkit()
-        mock_driver.execute_script.reset_mock()
+        mock_driver.swipe.reset_mock()
         result = toolkit.swipe("test_device", 540, 2000, 540, 500)
         assert result["success"] is True
-        # ensure_connected() 会先调用 getDeviceTime 做健康检查，再调用实际手势
-        assert mock_driver.execute_script.call_count == 2
-        mock_driver.execute_script.assert_called_with(
-            "mobile: swipeGesture",
-            {"left": 540, "top": 2000, "width": 0, "height": -1500, "duration": 500, "direction": "custom"},
-        )
+        # swipe 现在使用 driver.swipe()（W3C Actions API），不再走 execute_script
+        mock_driver.swipe.assert_called_once_with(540, 2000, 540, 500, 500)
 
     def test_long_press_success(self):
         """测试长按操作"""
