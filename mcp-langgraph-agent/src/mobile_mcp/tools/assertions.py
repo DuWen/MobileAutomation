@@ -7,7 +7,6 @@
 """
 
 import logging
-from typing import Dict, Optional
 
 from appium.webdriver.common.appiumby import AppiumBy
 from selenium.common.exceptions import (
@@ -41,23 +40,25 @@ class AssertToolkit:
         """
         self._device_manager = device_manager
 
-    def _check_device(self, device_name: str) -> Optional[WebDriver]:
+    def _check_device(self, device_name: str) -> WebDriver | None:
         """检查设备是否已连接并返回 WebDriver 实例。
+
+        使用 ensure_connected 替代直接 get_driver，当会话失效时自动重连。
 
         Args:
             device_name: 设备名称/标识符。
 
         Returns:
-            WebDriver 实例，设备未连接时返回 None。
+            WebDriver 实例，设备未连接且重连失败时返回 None。
         """
-        driver = self._device_manager.get_driver(device_name)
+        driver = self._device_manager.ensure_connected(device_name)
         if driver is None:
-            logger.warning("设备 '%s' 未连接", device_name)
+            logger.warning("设备 '%s' 未连接且重连失败", device_name)
         return driver
 
     def assert_text_visible(
         self, device_name: str, text: str, timeout: int = 10
-    ) -> Dict:
+    ) -> dict:
         """断言指定文本在设备屏幕上可见。
 
         在指定超时时间内轮询查找包含目标文本的元素，如果能找到
@@ -106,11 +107,11 @@ class AssertToolkit:
                     "assertion": "text_visible",
                 },
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return {
                 "success": False,
                 "data": {
-                    "message": f"断言文本可见性时发生错误: {str(e)}",
+                    "message": f"断言文本可见性时发生错误: {e!s}",
                     "text": text,
                     "error": str(e),
                     "assertion": "text_visible",
@@ -118,8 +119,8 @@ class AssertToolkit:
             }
 
     def assert_element_exists(
-        self, device_name: str, selector: Dict
-    ) -> Dict:
+        self, device_name: str, selector: dict
+    ) -> dict:
         """断言指定元素在设备屏幕上存在。
 
         使用给定的选择器在页面中查找元素，如果存在则认为断言通过。
@@ -176,11 +177,11 @@ class AssertToolkit:
                     "assertion": "element_exists",
                 },
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return {
                 "success": False,
                 "data": {
-                    "message": f"断言元素存在性时发生错误: {str(e)}",
+                    "message": f"断言元素存在性时发生错误: {e!s}",
                     "selector": selector,
                     "error": str(e),
                     "assertion": "element_exists",
@@ -189,7 +190,7 @@ class AssertToolkit:
 
     def assert_page_contains(
         self, device_name: str, text: str
-    ) -> Dict:
+    ) -> dict:
         """断言当前页面源包含指定文本内容。
 
         通过检查页面源（page source）中是否包含目标文本进行断言，
@@ -231,11 +232,11 @@ class AssertToolkit:
                         "assertion": "page_contains",
                     },
                 }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return {
                 "success": False,
                 "data": {
-                    "message": f"断言页面内容时发生错误: {str(e)}",
+                    "message": f"断言页面内容时发生错误: {e!s}",
                     "text": text,
                     "error": str(e),
                     "assertion": "page_contains",
@@ -245,9 +246,9 @@ class AssertToolkit:
     def wait_for_element(
         self,
         device_name: str,
-        selector: Dict,
+        selector: dict,
         timeout: int = 10,
-    ) -> Dict:
+    ) -> dict:
         """等待指定元素在设备屏幕上出现并可见。
 
         在指定超时时间内轮询等待元素变为可见状态，
@@ -312,11 +313,11 @@ class AssertToolkit:
                     "timeout": timeout,
                 },
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return {
                 "success": False,
                 "data": {
-                    "message": f"等待元素时发生错误: {str(e)}",
+                    "message": f"等待元素时发生错误: {e!s}",
                     "selector": selector,
                     "error": str(e),
                 },

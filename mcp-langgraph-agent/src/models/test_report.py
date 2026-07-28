@@ -5,9 +5,11 @@
 用于记录和展示移动端自动化测试的执行结果。
 """
 
-from enum import Enum
-from typing import List, Optional
+from __future__ import annotations
+
 from datetime import datetime
+from enum import Enum
+
 from pydantic import BaseModel, Field
 
 
@@ -34,11 +36,11 @@ class StepResult(BaseModel):
     step_index: int = Field(..., description="步骤在测试用例中的索引序号")
     action: str = Field(..., description="执行的操作动作描述")
     result: str = Field(..., description="执行结果描述信息")
-    screenshot_b64: Optional[str] = Field(default=None, description="步骤执行时截图的 Base64 编码，可选")
+    screenshot_b64: str | None = Field(default=None, description="步骤执行时截图的 Base64 编码，可选")
     passed: bool = Field(..., description="步骤是否执行通过")
-    error: Optional[str] = Field(default=None, description="步骤执行时的错误信息，无错误时为 None")
-    started_at: Optional[datetime] = Field(default=None, description="步骤开始执行的时间")
-    finished_at: Optional[datetime] = Field(default=None, description="步骤执行完成的时间")
+    error: str | None = Field(default=None, description="步骤执行时的错误信息，无错误时为 None")
+    started_at: datetime | None = Field(default=None, description="步骤开始执行的时间")
+    finished_at: datetime | None = Field(default=None, description="步骤执行完成的时间")
     duration: float = Field(default=0.0, description="步骤执行耗时（秒）")
 
 
@@ -52,10 +54,10 @@ class TestReport(BaseModel):
     test_case: str = Field(..., description="测试用例 ID 或名称")
     device: str = Field(..., description="执行测试的设备标识符")
     status: TestStatus = Field(default=TestStatus.PENDING, description="测试用例执行状态")
-    started_at: Optional[datetime] = Field(default=None, description="测试开始时间")
-    finished_at: Optional[datetime] = Field(default=None, description="测试完成时间")
+    started_at: datetime | None = Field(default=None, description="测试开始时间")
+    finished_at: datetime | None = Field(default=None, description="测试完成时间")
     duration: float = Field(default=0.0, description="测试总耗时（秒）")
-    steps: List[StepResult] = Field(default_factory=list, description="各步骤的执行结果列表")
+    steps: list[StepResult] = Field(default_factory=list, description="各步骤的执行结果列表")
     total_tokens: int = Field(default=0, description="AI 调用消耗的总 Token 数")
     cost: float = Field(default=0.0, description="测试执行的总成本（美元）")
     summary: str = Field(default="", description="测试执行结果总结说明")

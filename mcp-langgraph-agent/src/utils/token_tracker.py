@@ -1,21 +1,23 @@
 """Token 消耗追踪模块。
 
 追踪 LLM 调用的 Token 使用情况，包括每次调用的消耗统计、
-各模型消耗汇总、以及成本估算功能。
+各模型消耗汇总、成本估算功能，以及成本阈值监控与告警回调。
 """
 
 import json
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field, asdict
-from typing import Dict, List
+from collections.abc import Callable
+from dataclasses import dataclass
+
+logger = __import__('logging').getLogger(__name__)
 
 
 # ============================================================
 # 模型定价表（每千 Token 的价格，单位：美元）
 # 参考各模型官方定价，如有变动请及时更新
 # ============================================================
-_MODEL_PRICING: Dict[str, Dict[str, float]] = {
+_MODEL_PRICING: dict[str, dict[str, float]] = {
     'gpt-4o':                {'input': 0.005,  'output': 0.015},
     'gpt-4o-mini':           {'input': 0.00015, 'output': 0.0006},
     'gpt-4-turbo':           {'input': 0.01,   'output': 0.03},
@@ -57,16 +59,33 @@ class TokenTracker:
 
     记录并统计所有 LLM 调用的 Token 使用情况，提供成本估算和报告导出功能。
     使用线程安全的 defaultdict 存储记录，支持并发调用。
+    支持成本阈值监控与告警回调，当累计成本超过阈值时自动触发告警。
 
     Attributes:
         records: Token 消耗记录列表
         session_start: 当前会话开始时间戳
+        cost_alert_threshold: 成本告警阈值（美元），超过此值触发告警
+        cost_alert_callback: 成本告警回调函数
     """
 
-    def __init__(self) -> None:
-        """初始化 Token 追踪器。"""
-        self.records: List[TokenUsageRecord] = []
+    def __init__(
+        self,
+        cost_alert_threshold: float = 5.0,
+        cost_alert_callback: Callable[[dict], None] | None = None,
+    ) -> None:
+        """初始化 Token 追踪器。
+
+        Args:
+            cost_alert_threshold: 成本告警阈值（美元），默认 5.0。
+                当累计成本超过此值时触发告警回调。
+            cost_alert_callback: 成本告警回调函数，接收告警信息字典。
+                回调函数签名: callback(alert_info: Dict) -> None
+        """
+        self.records: list[TokenUsageRecord] = []
         self.session_start: float = time.time()
+        self.cost_alert_threshold: float = cost_alert_threshold
+        self.cost_alert_callback: Callable[[dict], None] | None = cost_alert_callback
+        self._alert_triggered: bool = False
 
     def add_record(
         self,
@@ -104,9 +123,13 @@ class TokenTracker:
             operation=operation,
         )
         self.records.append(record)
+
+        # 检查成本告警
+        self._check_cost_alert()
+
         return record
 
-    def get_summary(self) -> Dict:
+    def get_summary(self) -> dict:
         """获取累积统计摘要。
 
         计算所有记录的汇总数据，包括总消耗、各模型消耗等。
@@ -135,11 +158,11 @@ class TokenTracker:
             }
 
         # 按模型分组统计
-        by_model: Dict[str, Dict] = defaultdict(
+        by_model: dict[str, dict] = defaultdict(
             lambda: {'calls': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0, 'cost': 0.0}
         )
         # 按层级分组统计
-        by_tier: Dict[str, Dict] = defaultdict(
+        by_tier: dict[str, dict] = defaultdict(
             lambda: {'calls': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0, 'cost': 0.0}
         )
 
@@ -177,7 +200,7 @@ class TokenTracker:
             'session_duration': round(time.time() - self.session_start, 2),
         }
 
-    def get_records(self, operation: str | None = None) -> List[TokenUsageRecord]:
+    def get_records(self, operation: str | None = None) -> list[TokenUsageRecord]:
         """获取 Token 消耗记录列表。
 
         Args:
@@ -285,3 +308,58 @@ class TokenTracker:
         input_cost = (prompt_tokens / 1000) * pricing['input']
         output_cost = (completion_tokens / 1000) * pricing['output']
         return round(input_cost + output_cost, 8)
+
+    def _check_cost_alert(self) -> None:
+        """检查累计成本是否超过告警阈值。
+
+        当累计成本超过 cost_alert_threshold 时触发告警回调，
+        并设置 _alert_triggered 标志防止重复告警。
+        告警仅触发一次，直到调用 reset() 重置。
+        """
+        if self._alert_triggered:
+            return
+
+        total_cost = sum(r.cost for r in self.records)
+        if total_cost >= self.cost_alert_threshold:
+            self._alert_triggered = True
+            alert_info: dict = {
+                'event': 'cost_alert',
+                'total_cost': round(total_cost, 6),
+                'threshold': self.cost_alert_threshold,
+                'total_records': len(self.records),
+                'session_duration': round(time.time() - self.session_start, 2),
+                'by_model': {
+                    model: round(sum(r.cost for r in self.records if r.model == model), 6)
+                    for model in set(r.model for r in self.records)
+                },
+            }
+            logger.warning(
+                "[TokenTracker] 成本告警：累计成本 $%.6f 超过阈值 $%.2f",
+                total_cost,
+                self.cost_alert_threshold,
+            )
+            if self.cost_alert_callback:
+                try:
+                    self.cost_alert_callback(alert_info)
+                except Exception as e:  # noqa: BLE001
+                    logger.error("[TokenTracker] 成本告警回调执行失败: %s", e)
+
+    def set_cost_alert(
+        self,
+        threshold: float | None = None,
+        callback: Callable[[dict], None] | None = None,
+    ) -> None:
+        """动态设置成本告警参数。
+
+        允许在运行时更新告警阈值和回调函数。
+
+        Args:
+            threshold: 新的告警阈值（美元），为 None 时保持不变
+            callback: 新的告警回调函数，为 None 时保持不变
+        """
+        if threshold is not None:
+            self.cost_alert_threshold = threshold
+        if callback is not None:
+            self.cost_alert_callback = callback
+        # 重置告警标志，允许新阈值触发告警
+        self._alert_triggered = False

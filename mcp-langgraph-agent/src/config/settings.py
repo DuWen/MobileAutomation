@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     """LLM API 密钥"""
     LLM_MODEL: str = "gpt-4o"
     """LLM 模型名称"""
+    LLM_BASE_URL: str = ""
+    """LLM API 基础地址（兼容 OpenAI 格式的第三方 API，如 LM Studio、Ollama）"""
     LLM_MAX_TOKENS: int = 4096
     """LLM 每次请求的最大 token 数"""
     LLM_TEMPERATURE: float = 0.7
@@ -94,8 +96,32 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------
     # Skills 配置
     # ------------------------------------------------------------
-    SKILLS_DIR: str = "skills"
+    SKILLS_DIR: str = "src/skills"
     """技能（Skills）目录路径"""
+    SKILLS_TOP_K: int = 3
+    """每次匹配最多返回的 Skill 数量"""
+    SKILLS_MATCH_THRESHOLD: float = 0.1
+    """Skill 匹配的最低分数阈值"""
+
+    # ------------------------------------------------------------
+    # 感知策略配置
+    # ------------------------------------------------------------
+    PERCEPTION_MODE: str = "hybrid"
+    """感知模式，可选值：ui_tree / screenshot / hybrid"""
+
+    # ------------------------------------------------------------
+    # 成本监控配置
+    # ------------------------------------------------------------
+    COST_ALERT_THRESHOLD: float = 5.0
+    """成本告警阈值（美元），累计成本超过此值触发告警"""
+
+    # ------------------------------------------------------------
+    # 通知配置
+    # ------------------------------------------------------------
+    FEISHU_WEBHOOK_URL: str = ""
+    """飞书 Webhook URL，为空时禁用飞书通知"""
+    SLACK_WEBHOOK_URL: str = ""
+    """Slack Webhook URL，为空时禁用 Slack通知"""
 
     # ------------------------------------------------------------
     # 日志配置

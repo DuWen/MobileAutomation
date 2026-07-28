@@ -2,13 +2,35 @@
 AgentState 定义模块。
 
 使用 TypedDict + Annotated 实现 LangGraph 的 State 定义，
-列表字段通过 operator.add 实现合并操作。
+列表字段通过 add_messages 和 operator.add 实现合并操作。
+对齐设计文档中的 AgentState 定义。
 """
 
 from __future__ import annotations
 
 import operator
-from typing import Annotated, List, Optional, TypedDict
+from typing import Annotated, TypedDict
+
+from langgraph.graph.message import add_messages
+
+
+def replace_if_non_empty(old: list, new: list) -> list:
+    """列表 reducer：新值非空 list 时整体替换，否则保留原值。
+
+    用于 test_plan 字段，支持重新规划场景下整体替换测试计划。
+    其他节点（executor/verifier/reviewer）不返回该字段时保持原值不变，
+    避免意外清空。首次规划时 old 为空列表，new 为完整计划，正常替换。
+
+    Args:
+        old: 当前 state 中的列表值
+        new: 节点返回的新列表值
+
+    Returns:
+        合并后的列表
+    """
+    if isinstance(new, list) and len(new) > 0:
+        return new
+    return old if old is not None else []
 
 
 class AgentState(TypedDict):
@@ -16,64 +38,77 @@ class AgentState(TypedDict):
     LangGraph 工作流的 Agent 状态定义。
 
     包含测试目标、测试步骤、执行结果、UI 信息、验证结果等全部运行时状态。
-    列表字段使用 Annotated + operator.add 实现跨节点的增量合并。
+    列表字段使用 Annotated + add_messages/operator.add 实现跨节点的增量合并。
     """
 
-    # ── 测试目标与步骤 ──────────────────────────────────────────────
+    # ── 消息历史 ──────────────────────────────────────────────────
+    messages: Annotated[list, add_messages]
+    """对话历史消息列表，使用 langgraph 的 add_messages 合并策略。"""
+
+    # ── 测试目标 ──────────────────────────────────────────────────
     test_goal: str
     """用户输入的测试目标（自然语言描述）。"""
 
-    test_steps: Annotated[List[str], operator.add]
-    """规划出的测试步骤列表，规划节点生成，支持合并。"""
+    # ── 当前页面信息 ──────────────────────────────────────────────
+    current_screen: str
+    """当前屏幕的文本描述（由 Explorer 节点生成）。"""
+
+    ui_tree: str | None
+    """当前设备界面的无障碍树（Accessibility Tree）JSON 字符串。"""
+
+    screenshot_b64: str | None
+    """当前设备截图的 Base64 编码字符串。"""
+
+    # ── 测试计划与执行 ────────────────────────────────────────────
+    test_plan: Annotated[list[dict], replace_if_non_empty]
+    """测试步骤计划列表，每个元素包含 action/target/value/expected 等字段。
+    使用 replace_if_non_empty reducer，支持重新规划时整体替换计划。"""
+
+    executed_steps: Annotated[list[dict], operator.add]
+    """已执行步骤列表，每个元素包含 step, action, result, screenshot, passed 等字段。"""
 
     current_step_index: int
     """当前执行步骤的索引（从 0 开始）。"""
 
-    executed_steps: Annotated[List[dict], operator.add]
-    """已执行步骤列表，每个元素包含 step, action, result, screenshot, passed 等字段。"""
-
-    # ── 设备 / UI 信息 ─────────────────────────────────────────────
-    ui_tree: Optional[str]
-    """当前设备界面的无障碍树（Accessibility Tree）JSON 字符串。"""
-
-    screenshot_b64: Optional[str]
-    """当前设备截图的 Base64 编码字符串。"""
-
-    device_name: str
-    """被测设备名称（如 'emulator-5554' 或 'iPhone 15'）。"""
-
-    test_plan: Optional[dict]
-    """测试计划，包含步骤列表和预期结果等结构化信息。"""
-
-    # ── 验证结果 ───────────────────────────────────────────────────
-    verification_passed: bool
+    # ── 验证与结果 ────────────────────────────────────────────────
+    verification_result: bool
     """当前步骤验证是否通过。"""
 
-    verification_details: Annotated[List[dict], operator.add]
-    """验证详情列表，每条记录包含验证项、预期值、实际值、是否通过等。"""
+    failure_reason: str
+    """验证失败时的原因描述。"""
 
-    # ── 重试机制 ───────────────────────────────────────────────────
     retry_count: int
     """当前步骤已重试次数。"""
 
-    max_retries: int
-    """当前步骤最大允许重试次数。"""
+    replan_count: int
+    """已触发的重新规划次数（防死循环）。
+    当 verifier 失败且重试超限时，路由到 explorer 重新感知+planner 重新规划，
+    每触发一次递增，达到 MAX_REPLAN_COUNT 时强制结束。"""
 
-    # ── 错误与消息 ─────────────────────────────────────────────────
-    error: Optional[str]
-    """错误信息，节点执行出错时填充。"""
+    # ── 设备信息 ──────────────────────────────────────────────────
+    device_name: str
+    """被测设备名称（如 'emulator-5554' 或 'iPhone 15'）。"""
 
-    messages: Annotated[List[dict], operator.add]
-    """对话历史消息列表，用于 LLM 调用上下文。"""
+    device_connected: bool
+    """设备是否已通过 Appium 建立连接，由 Explorer 节点在首次连接后设置为 True。"""
 
+    # ── 最终报告 ──────────────────────────────────────────────────
+    final_report: str
+    """测试执行完成后的最终报告文本。"""
+
+    # ── 扩展字段（当前实现需要但设计文档未明确列出） ──────────────
     node_outputs: dict
     """各节点的输出缓存，key 为节点名，value 为输出内容。"""
 
-    # ── 审查 ───────────────────────────────────────────────────────
-    reviewer_feedback: Optional[str]
-    """审查节点的反馈意见。"""
+    perception_mode: str
+    """感知模式：ui_tree / screenshot / hybrid，默认 hybrid。"""
 
-    # ── 统计与元数据 ───────────────────────────────────────────────
+    matched_skills: list | None
+    """与测试目标匹配的 Skill 知识列表，由 Explorer 节点匹配并注入。"""
+
+    skill_context: str | None
+    """格式化后的 Skill 知识文本，注入到后续节点的系统提示词中。"""
+
     total_tokens_used: int
     """整个工作流已消耗的 Token 总数。"""
 

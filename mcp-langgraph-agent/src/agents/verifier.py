@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from src.agents.base import BaseAgent
 from src.agents.llm import ModelRouter
@@ -47,7 +47,7 @@ class VerifierAgent(BaseAgent):
             token_tracker=token_tracker,
         )
 
-    async def run(self, **kwargs: Any) -> Dict[str, Any]:
+    async def run(self, **kwargs: Any) -> dict[str, Any]:
         """运行验证 Agent 的核心逻辑。
 
         分析执行结果和当前界面状态，判断步骤是否成功。
@@ -57,21 +57,27 @@ class VerifierAgent(BaseAgent):
                 - execution_record: 上一步的执行记录
                 - ui_tree: 当前界面 UI 树
                 - screenshot_b64: 当前界面截图 Base64
-                - test_plan: 测试计划（含预期结果）
-                - verification_points: 验证点列表
+                - test_plan: 测试步骤计划列表
 
         Returns:
-            验证结果字典，包含 verification_passed, verification_details 等字段
+            验证结果字典，包含 verification_passed, failure_reason 等字段
         """
         execution_record: dict = kwargs.get('execution_record', {})
         ui_tree: str = kwargs.get('ui_tree', '')
         screenshot_b64: str = kwargs.get('screenshot_b64', '')
-        test_plan: dict = kwargs.get('test_plan', {})
-        verification_points: list = kwargs.get('verification_points', [])
+        test_plan: list = kwargs.get('test_plan', [])
 
-        # 如果没有提供验证点，从测试计划中提取
-        if not verification_points and test_plan:
-            verification_points = test_plan.get('expected_results', [])
+        # 从测试计划中提取验证点（兼容 str 和 dict 两种步骤格式）
+        verification_points: list = []
+        if test_plan:
+            for step in test_plan:
+                if isinstance(step, dict):
+                    expected = step.get('expected', step.get('expected_result', ''))
+                    if expected:
+                        verification_points.append(expected)
+                elif isinstance(step, str):
+                    # 字符串步骤无法提取预期结果，跳过
+                    pass
 
         # 构建 LLM 消息序列
         messages = [
@@ -101,19 +107,37 @@ class VerifierAgent(BaseAgent):
         )
 
         # 解析 LLM 返回的验证结果
-        verify_result: Dict[str, Any] = self._parse_json_response(
+        verify_result: dict[str, Any] = self._parse_json_response(
             response,
             fallback=self._generate_fallback_verification(execution_record, verification_points),
         )
 
         # 提取验证详情
-        verification_details: List[Dict[str, Any]] = self._extract_verification_details(
+        verification_details: list[dict[str, Any]] = self._extract_verification_details(
             verify_result, execution_record, verification_points
         )
 
         # 判断总体是否通过
         overall_status: str = verify_result.get('overall_status', 'partial')
-        verification_passed: bool = overall_status == 'passed'
+        execution_passed: bool = execution_record.get('passed', False)
+
+        # MCP 执行成功时，partial 视为 passed
+        # 小模型常返回 partial 而非 passed，当 MCP 已确认操作成功时应信任 MCP 结果
+        if overall_status == 'partial' and execution_passed:
+            verification_passed: bool = True
+            logger.info(
+                "[VerifierAgent] MCP 执行成功，partial 视为 passed"
+            )
+        else:
+            verification_passed = overall_status == 'passed'
+
+        # 生成失败原因（验证不通过时）
+        failure_reason: str = ''
+        if not verification_passed:
+            failure_reason = verify_result.get('summary', '')
+            if not failure_reason and verification_details:
+                failed_items = [d.get('check', '') for d in verification_details if not d.get('passed', False)]
+                failure_reason = f"验证未通过: {', '.join(failed_items)}" if failed_items else '验证未通过'
 
         logger.info(
             f"[VerifierAgent] 验证完成，结果: {overall_status}，"
@@ -122,7 +146,7 @@ class VerifierAgent(BaseAgent):
 
         return {
             'verification_passed': verification_passed,
-            'verification_details': verification_details,
+            'failure_reason': failure_reason,
             'overall_status': overall_status,
             'summary': verify_result.get('summary', ''),
             'suggestions': verify_result.get('suggestions', []),
@@ -130,10 +154,10 @@ class VerifierAgent(BaseAgent):
 
     def _extract_verification_details(
         self,
-        verify_result: Dict[str, Any],
-        execution_record: Dict[str, Any],
-        verification_points: List[str],
-    ) -> List[Dict[str, Any]]:
+        verify_result: dict[str, Any],
+        execution_record: dict[str, Any],
+        verification_points: list[str],
+    ) -> list[dict[str, Any]]:
         """从验证结果中提取结构化验证详情。
 
         统一不同格式的验证详情为标准格式。
@@ -146,7 +170,7 @@ class VerifierAgent(BaseAgent):
         Returns:
             标准化的验证详情列表
         """
-        details: List[Dict[str, Any]] = []
+        details: list[dict[str, Any]] = []
 
         # 从 LLM 结果中提取详情
         raw_details = verify_result.get('verification_details', [])
@@ -186,9 +210,9 @@ class VerifierAgent(BaseAgent):
 
     def _generate_fallback_verification(
         self,
-        execution_record: Dict[str, Any],
-        verification_points: List[str],
-    ) -> Dict[str, Any]:
+        execution_record: dict[str, Any],
+        verification_points: list[str],
+    ) -> dict[str, Any]:
         """生成 fallback 验证结果。
 
         当 LLM 返回无法解析时使用，基于执行记录中的 passed 字段生成验证结果。
@@ -216,7 +240,7 @@ class VerifierAgent(BaseAgent):
             'suggestions': [] if execution_passed else ['建议重试当前步骤'],
         }
 
-    def _parse_json_response(self, response: str, fallback: Dict[str, Any]) -> Dict[str, Any]:
+    def _parse_json_response(self, response: str, fallback: dict[str, Any]) -> dict[str, Any]:
         """解析 LLM 返回的 JSON 格式响应。
 
         Args:

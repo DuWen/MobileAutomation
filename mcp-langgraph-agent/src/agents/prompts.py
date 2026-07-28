@@ -83,6 +83,11 @@ PLANNER_PROMPT = """## 任务目标
 ## 探索分析结果
 {exploration_result}
 
+## 已执行步骤上下文
+{executed_steps_context}
+
+{replan_instruction}
+
 ## 输出要求
 请以 JSON 格式输出测试计划，包含以下字段：
 - `test_goal_restatement`: 对测试目标的重述，确保理解一致
@@ -123,15 +128,76 @@ EXECUTOR_PROMPT = """## 任务目标
 ## 历史操作记录
 {history}
 
+## 可用 MCP 工具列表
+以下工具可通过 tool_actions 字段调用：
+
+1. **tap_element** — 点击元素
+   参数: device_name, by("id"|"xpath"|"accessibility_id"|"text"), value(定位值), use_bounds_fallback(可选,默认true)
+
+2. **input_text** — 向元素输入文本
+   参数: device_name, by("id"|"xpath"|"accessibility_id"|"text"), value(定位值), text(要输入的文本)
+
+3. **swipe** — 滑动操作
+   参数: device_name, start_x, start_y, end_x, end_y, duration(可选,默认500)
+
+4. **take_screenshot** — 截取当前屏幕
+   参数: device_name
+
+5. **assert_text_visible** — 断言文本可见
+   参数: device_name, expected_text, timeout(可选,默认10)
+
+## 定位策略说明
+- **id**: 使用 resource-id，如 "com.example:id/et_account"
+- **xpath**: 使用 XPath 表达式
+- **accessibility_id**: 使用 content-description
+- **text**: 使用元素显示的文本内容
+
+**重要**: 优先使用 id 定位（最精确），text 定位作为备选。
+
 ## 输出要求
 请以 JSON 格式输出执行结果，包含以下字段：
 - `step_executed`: 已执行的步骤编号
 - `action_performed`: 执行的操作类型和参数
+- `tool_actions`: **(必填)** 需要调用的 MCP 工具列表，每个元素包含：
+  - `tool`: 工具名称（必须与上方工具列表一致）
+  - `params`: 工具参数字典（不需要填 device_name，系统会自动注入）
 - `status`: 执行状态（success/failure/retry/blocked）
 - `screenshot_taken`: 是否已截图保存现场
 - `ui_changes`: 界面变化描述
 - `error_info`: 如果执行失败，提供错误信息和建议
 - `next_action`: 下一步建议（continue/retry/verify/abort）
+
+## tool_actions 示例
+对于步骤 "输入 admin1 到账号输入框 (resource-id: com.example:id/et_account)":
+```json
+{{
+  "tool_actions": [
+    {{
+      "tool": "input_text",
+      "params": {{
+        "by": "id",
+        "value": "com.example:id/et_account",
+        "text": "admin1"
+      }}
+    }}
+  ]
+}}
+```
+
+对于步骤 "点击登录按钮 (text: 登录)":
+```json
+{{
+  "tool_actions": [
+    {{
+      "tool": "tap_element",
+      "params": {{
+        "by": "text",
+        "value": "登录"
+      }}
+    }}
+  ]
+}}
+```
 """
 
 
@@ -149,16 +215,27 @@ VERIFIER_PROMPT = """## 任务目标
 ## 已执行的操作
 {executed_actions}
 
-## 当前界面信息
+## 当前界面信息（操作后的最新状态）
 ### UI 结构树
 {ui_tree}
 
 ### 截图描述
 {screenshot_description}
 
+## 重要判定规则
+1. **MCP 执行结果是强证据**：如果 executed_actions 中 passed=true 且 MCP 工具返回成功，
+   这说明操作确实在设备上执行了，应倾向于判定 passed。
+2. **只有确凿的反证才能推翻**：只有当 UI 树或截图中存在明确的矛盾证据
+   （如预期输入的文本完全不在界面中），才能判定 failed。
+3. **不确定时选择 passed**：如果界面信息不够明确，但 MCP 执行成功，应判定 passed 而非 partial。
+4. **partial 仅用于部分验证点通过**：仅当部分验证点明确失败、部分通过时才使用 partial。
+
 ## 输出要求
 请以 JSON 格式输出验证结果，包含以下字段：
 - `overall_status`: 总体验证状态（passed/failed/partial）
+  - passed: 操作成功执行且结果符合预期
+  - failed: 有明确证据表明操作未生效
+  - partial: 部分验证点通过、部分失败
 - `verification_details`: 每个验证点的详细结果，包含：
   - `point`: 验证点描述
   - `expected`: 预期值
@@ -188,9 +265,21 @@ REVIEWER_PROMPT = """## 任务目标
 ## 验证结果
 {verification_result}
 
+## 重要判定规则
+1. **MCP 执行+验证通过是强证据**：如果所有步骤的 MCP 工具调用成功且验证通过，
+   应判定为 passed，无需额外怀疑。
+2. **只有明确的失败证据才能判 failed**：只有当执行记录中有步骤 MCP 调用失败
+   或验证明确不通过时，才能判定 failed。
+3. **partial 仅用于部分步骤失败**：仅当部分步骤失败、部分通过时才使用 partial。
+4. **不确定时倾向 passed**：如果执行记录显示全部通过但信息不够详细，应判定 passed。
+
 ## 输出要求
 请以 JSON 格式输出审查报告，包含以下字段：
 - `overall_assessment`: 总体评估（passed/failed/partial/inconclusive）
+  - passed: 所有步骤执行成功，测试目标达成
+  - failed: 有步骤明确失败，测试目标未达成
+  - partial: 部分步骤失败，部分通过
+  - inconclusive: 无法判断
 - `coverage_analysis`: 覆盖度分析，包括：
   - `goal_achieved`: 测试目标是否达成
   - `uncovered_areas`: 未覆盖的测试场景

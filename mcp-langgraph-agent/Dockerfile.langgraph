@@ -1,8 +1,6 @@
-"""
-LangGraph Agent Dockerfile
-
-基于 python:3.11-slim 构建 LangGraph Agent 服务镜像，用于编排和执行自动化测试流程。
-"""
+# LangGraph Agent Dockerfile
+#
+# 基于 python:3.11-slim 构建 LangGraph Agent 服务镜像，用于编排和执行自动化测试流程。
 
 # 使用 Python 3.11 精简版作为基础镜像
 FROM python:3.11-slim
@@ -32,4 +30,4 @@ COPY pyproject.toml .
 EXPOSE 8001
 
 # 启动 LangGraph Agent Service
-CMD ["python", "-m", "src.langgraph_agent"]
+CMD ["python", "-m", "src.main"]

@@ -5,9 +5,9 @@ LangGraph Workflow 测试模块
 所有测试使用 mock 替代 LLM 调用，确保测试独立且快速。
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 
 # ============================================================
 # 测试状态定义
@@ -21,24 +21,27 @@ class TestAgentState:
         """测试 AgentState 包含所有必需字段"""
         from src.graph.state import AgentState
 
-        # 创建默认状态
+        # 创建默认状态（对齐 AgentState 真实字段名）
         state = AgentState(
             test_goal="测试登录功能",
-            test_steps=[],
             current_step_index=0,
             executed_steps=[],
             ui_tree=None,
             screenshot_b64=None,
             device_name="emulator-5554",
-            test_plan=None,
-            verification_passed=False,
-            verification_details=[],
+            test_plan=[],
+            verification_result=False,
+            failure_reason='',
             retry_count=0,
-            max_retries=3,
-            error=None,
+            replan_count=0,
+            device_connected=False,
+            final_report='',
+            current_screen='',
             messages=[],
             node_outputs={},
-            reviewer_feedback=None,
+            matched_skills=None,
+            skill_context=None,
+            perception_mode="hybrid",
             total_tokens_used=0,
             metadata={},
         )
@@ -46,39 +49,39 @@ class TestAgentState:
         assert state['test_goal'] == "测试登录功能"
         assert state['current_step_index'] == 0
         assert state['retry_count'] == 0
-        assert state['max_retries'] == 3
-        assert state['verification_passed'] is False
+        assert state['verification_result'] is False
 
     def test_state_list_fields_merge_with_operator_add(self):
         """测试列表字段支持 operator.add 合并"""
         from src.graph.state import AgentState
-        import operator
 
-        # 验证 Annotated 类型使用 operator.add
+        # 验证 Annotated 类型使用 operator.add（对齐 AgentState 真实字段名）
         state = AgentState(
             test_goal="测试",
-            test_steps=["步骤1"],
             current_step_index=0,
             executed_steps=[{"step": "s1"}],
             ui_tree=None,
             screenshot_b64=None,
             device_name="dev",
-            test_plan=None,
-            verification_passed=False,
-            verification_details=[{"check": "c1", "passed": True}],
+            test_plan=[{"action": "步骤1"}],
+            verification_result=False,
+            failure_reason='',
             retry_count=0,
-            max_retries=3,
-            error=None,
+            replan_count=0,
+            device_connected=False,
+            final_report='',
+            current_screen='',
             messages=[{"role": "user", "content": "hi"}],
             node_outputs={},
-            reviewer_feedback=None,
+            matched_skills=None,
+            skill_context=None,
+            perception_mode="hybrid",
             total_tokens_used=0,
             metadata={},
         )
 
-        assert len(state['test_steps']) == 1
+        assert len(state['test_plan']) == 1
         assert len(state['executed_steps']) == 1
-        assert len(state['verification_details']) == 1
         assert len(state['messages']) == 1
 
 
@@ -126,11 +129,11 @@ class TestRouteAfterVerifier:
         from src.graph.workflow import route_after_verifier
 
         state = {
-            'verification_passed': True,
+            'verification_result': True,
             'current_step_index': 1,  # verifier 已递增
-            'test_steps': ['步骤1', '步骤2', '步骤3'],
+            'test_plan': [{}, {}, {}],  # 3 个 dict，total_steps=3
             'retry_count': 0,
-            'max_retries': 3,
+            'replan_count': 0,
         }
 
         result = route_after_verifier(state)
@@ -141,11 +144,11 @@ class TestRouteAfterVerifier:
         from src.graph.workflow import route_after_verifier
 
         state = {
-            'verification_passed': True,
+            'verification_result': True,
             'current_step_index': 3,  # 等于 total_steps
-            'test_steps': ['步骤1', '步骤2', '步骤3'],
+            'test_plan': [{}, {}, {}],  # 3 个 dict，total_steps=3
             'retry_count': 0,
-            'max_retries': 3,
+            'replan_count': 0,
         }
 
         result = route_after_verifier(state)
@@ -154,30 +157,45 @@ class TestRouteAfterVerifier:
     def test_route_to_executor_on_fail_with_retries_left(self):
         """测试验证失败但可重试时路由到 executor"""
         from src.graph.workflow import route_after_verifier
-        from langgraph.graph import END
 
         state = {
-            'verification_passed': False,
+            'verification_result': False,
             'current_step_index': 0,
-            'test_steps': ['步骤1', '步骤2'],
-            'retry_count': 1,  # 小于 max_retries
-            'max_retries': 3,
+            'test_plan': [{}, {}],
+            'retry_count': 1,  # 小于 MAX_RETRIES=3
+            'replan_count': 0,
         }
 
         result = route_after_verifier(state)
         assert result == "executor"
 
-    def test_route_to_end_on_fail_max_retries_exceeded(self):
-        """测试验证失败且重试超限时路由到 END"""
+    def test_route_to_explorer_on_fail_max_retries_exceeded(self):
+        """测试验证失败且重试超限但未超重新规划次数时路由到 explorer"""
         from src.graph.workflow import route_after_verifier
-        from langgraph.graph import END
 
         state = {
-            'verification_passed': False,
+            'verification_result': False,
             'current_step_index': 0,
-            'test_steps': ['步骤1', '步骤2'],
-            'retry_count': 3,  # 等于 max_retries
-            'max_retries': 3,
+            'test_plan': [{}, {}],
+            'retry_count': 3,  # 等于 MAX_RETRIES=3，重试超限
+            'replan_count': 0,  # 小于 MAX_REPLAN_COUNT=2，触发重新规划
+        }
+
+        result = route_after_verifier(state)
+        assert result == "explorer"
+
+    def test_route_to_end_on_replan_count_exceeded(self):
+        """测试验证失败且重试超限且重新规划次数也超限时路由到 END"""
+        from langgraph.graph import END
+
+        from src.graph.workflow import route_after_verifier
+
+        state = {
+            'verification_result': False,
+            'current_step_index': 0,
+            'test_plan': [{}, {}],
+            'retry_count': 3,  # 等于 MAX_RETRIES=3，重试超限
+            'replan_count': 2,  # 等于 MAX_REPLAN_COUNT=2，重新规划也超限
         }
 
         result = route_after_verifier(state)
@@ -189,8 +207,9 @@ class TestRouteAfterReviewer:
 
     def test_route_to_end_on_review_passed(self):
         """测试审查通过时路由到 END"""
-        from src.graph.workflow import route_after_reviewer
         from langgraph.graph import END
+
+        from src.graph.workflow import route_after_reviewer
 
         state = {
             'node_outputs': {
@@ -296,8 +315,8 @@ class TestPlannerNode:
 
             result = await planner_node(state)
 
+            # planner 返回 test_plan（List[dict]），不返回 test_steps
             assert 'test_plan' in result
-            assert 'test_steps' in result
             assert result['current_step_index'] == 0
             assert result['retry_count'] == 0
 
@@ -334,11 +353,10 @@ class TestExecutorNode:
             mock_get.return_value = mock_agent
 
             state = {
-                'test_steps': ['步骤1', '步骤2'],
                 'current_step_index': 0,
                 'ui_tree': '',
                 'screenshot_b64': '',
-                'test_plan': {},
+                'test_plan': [{'action': '步骤1'}, {'action': '步骤2'}],
                 'executed_steps': [],
                 'messages': [],
                 'node_outputs': {},
@@ -357,11 +375,10 @@ class TestExecutorNode:
         from src.graph.nodes.executor import executor_node
 
         state = {
-            'test_steps': ['步骤1'],
             'current_step_index': 5,  # 越界
             'ui_tree': '',
             'screenshot_b64': '',
-            'test_plan': {},
+            'test_plan': [{'action': '步骤1'}],
             'executed_steps': [],
             'messages': [],
             'node_outputs': {},
@@ -370,7 +387,8 @@ class TestExecutorNode:
 
         result = await executor_node(state)
 
-        assert 'error' in result
+        # 索引越界时返回 failure_reason（不是顶层 error），node_outputs.executor.error 记录原因
+        assert 'failure_reason' in result
         assert result['node_outputs']['executor']['error'] == '索引越界'
 
     @pytest.mark.asyncio
@@ -406,10 +424,9 @@ class TestVerifierNode:
                 'executed_steps': [{'step': '步骤1', 'step_index': 0, 'passed': True}],
                 'ui_tree': '',
                 'screenshot_b64': '',
-                'test_plan': {},
+                'test_plan': [],
                 'current_step_index': 0,
                 'retry_count': 0,
-                'max_retries': 3,
                 'messages': [],
                 'node_outputs': {},
                 'total_tokens_used': 0,
@@ -417,7 +434,8 @@ class TestVerifierNode:
 
             result = await verifier_node(state)
 
-            assert result['verification_passed'] is True
+            # verifier 返回 verification_result（不是 verification_passed）
+            assert result['verification_result'] is True
             assert result['current_step_index'] == 1  # 递增
             assert result['retry_count'] == 0  # 重置
 
@@ -442,10 +460,9 @@ class TestVerifierNode:
                 'executed_steps': [{'step': '步骤1', 'step_index': 0, 'passed': False}],
                 'ui_tree': '',
                 'screenshot_b64': '',
-                'test_plan': {},
+                'test_plan': [],
                 'current_step_index': 0,
                 'retry_count': 0,
-                'max_retries': 3,
                 'messages': [],
                 'node_outputs': {},
                 'total_tokens_used': 0,
@@ -453,7 +470,8 @@ class TestVerifierNode:
 
             result = await verifier_node(state)
 
-            assert result['verification_passed'] is False
+            # verifier 快速路径：execution_passed=False 时直接判定验证失败
+            assert result['verification_result'] is False
             assert result['current_step_index'] == 0  # 不变
             assert result['retry_count'] == 1  # 递增
 
@@ -466,10 +484,9 @@ class TestVerifierNode:
             'executed_steps': [],
             'ui_tree': '',
             'screenshot_b64': '',
-            'test_plan': {},
+            'test_plan': [],
             'current_step_index': 0,
             'retry_count': 0,
-            'max_retries': 3,
             'messages': [],
             'node_outputs': {},
             'total_tokens_used': 0,
@@ -477,7 +494,8 @@ class TestVerifierNode:
 
         result = await verifier_node(state)
 
-        assert result['verification_passed'] is False
+        # 空 executed_steps 时返回 verification_result=False
+        assert result['verification_result'] is False
 
     @pytest.mark.asyncio
     async def test_verifier_agent_uses_precise_model(self):
@@ -513,10 +531,8 @@ class TestReviewerNode:
 
             state = {
                 'test_goal': '测试登录',
-                'test_plan': {'goal': '测试登录'},
+                'test_plan': [{'goal': '测试登录'}],
                 'executed_steps': [{'step': '步骤1', 'passed': True}],
-                'verification_details': [{'check': 'c1', 'passed': True}],
-                'test_steps': ['步骤1'],
                 'messages': [],
                 'node_outputs': {},
                 'total_tokens_used': 0,
@@ -524,8 +540,10 @@ class TestReviewerNode:
 
             result = await reviewer_node(state)
 
-            assert result['reviewer_feedback'] == '审查通过'
+            # reviewer 快速路径：executed_steps 全 passed 且 >= len(test_plan)
+            # 直接判定通过，跳过 LLM。feedback 在 node_outputs.reviewer.feedback
             assert result['node_outputs']['reviewer']['passed'] is True
+            assert '审查通过' in result['node_outputs']['reviewer']['feedback']
 
     @pytest.mark.asyncio
     async def test_reviewer_agent_uses_precise_model(self):
@@ -584,13 +602,23 @@ class TestModelRouter:
 
     def test_model_router_call_returns_tuple(self):
         """测试模型路由器调用返回三元组"""
+        from unittest.mock import MagicMock, patch
+
         from src.agents.llm import ModelRouter
 
         router = ModelRouter()
-        model_name, content, usage = router.call(
-            messages=[{'role': 'user', 'content': '测试'}],
-            tier='light',
-        )
+        # mock provider 避免真实调用 LLM API（CI 中无有效 API key）
+        mock_provider = MagicMock()
+        mock_provider.call.return_value = {
+            "model": "test-model",
+            "content": "测试响应",
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+        with patch.object(router, "_get_provider", return_value=mock_provider):
+            model_name, content, usage = router.call(
+                messages=[{'role': 'user', 'content': '测试'}],
+                tier='light',
+            )
         assert isinstance(model_name, str)
         assert isinstance(content, str)
         assert isinstance(usage, dict)
@@ -682,8 +710,9 @@ class TestTokenTracker:
 
     def test_export_report_json(self):
         """测试导出 JSON 格式报告"""
-        from src.utils.token_tracker import TokenTracker
         import json
+
+        from src.utils.token_tracker import TokenTracker
 
         tracker = TokenTracker()
         tracker.add_record(
@@ -791,23 +820,27 @@ class TestWorkflowIntegration:
 
             # 构建并执行工作流
             app = build_workflow()
+            # initial_state 对齐 AgentState 真实字段名
             initial_state = {
                 'test_goal': '测试登录功能',
-                'test_steps': [],
                 'current_step_index': 0,
                 'executed_steps': [],
                 'ui_tree': None,
                 'screenshot_b64': None,
                 'device_name': 'emulator-5554',
-                'test_plan': None,
-                'verification_passed': False,
-                'verification_details': [],
+                'test_plan': [],
+                'verification_result': False,
+                'failure_reason': '',
                 'retry_count': 0,
-                'max_retries': 3,
-                'error': None,
+                'replan_count': 0,
+                'device_connected': False,
+                'final_report': '',
+                'current_screen': '',
                 'messages': [],
                 'node_outputs': {},
-                'reviewer_feedback': None,
+                'matched_skills': None,
+                'skill_context': None,
+                'perception_mode': 'hybrid',
                 'total_tokens_used': 0,
                 'metadata': {'task_id': 'test-task'},
             }
@@ -821,3 +854,589 @@ class TestWorkflowIntegration:
 
             # 验证工作流完成
             assert final_state is not None
+
+
+# ============================================================
+# Skills 管理器测试
+# ============================================================
+
+
+class TestSkillManager:
+    """Skills 知识库管理器测试"""
+
+    def test_skill_manager_loads_skills(self, tmp_path):
+        """测试 SkillManager 加载 Skills 文件"""
+        from src.skills.manager import SkillManager
+
+        # 创建临时 Skills 目录
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        (skills_dir / "login.md").write_text(
+            "# 登录测试 Skill\n\n## 适用场景\n用户登录 / 账号切换\n\n## 测试要点\n1. 定位登录按钮\n",
+            encoding="utf-8",
+        )
+        (skills_dir / "search.md").write_text(
+            "# 搜索测试 Skill\n\n## 适用场景\n搜索功能 / 筛选过滤\n\n## 测试要点\n1. 搜索框定位\n",
+            encoding="utf-8",
+        )
+
+        manager = SkillManager(skills_dir=str(skills_dir))
+        assert len(manager.list_skills()) == 2
+        assert "login" in manager.list_skills()
+        assert "search" in manager.list_skills()
+
+    def test_skill_manager_match_skills(self, tmp_path):
+        """测试 SkillManager 匹配 Skills"""
+        from src.skills.manager import SkillManager
+
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        (skills_dir / "login.md").write_text(
+            "# 登录测试 Skill\n\n## 适用场景\n用户登录 / 账号切换 / 密码重置\n\n## 测试要点\n1. 定位登录按钮\n",
+            encoding="utf-8",
+        )
+        (skills_dir / "search.md").write_text(
+            "# 搜索测试 Skill\n\n## 适用场景\n搜索功能 / 筛选过滤\n\n## 测试要点\n1. 搜索框定位\n",
+            encoding="utf-8",
+        )
+
+        manager = SkillManager(skills_dir=str(skills_dir))
+        matched = manager.match_skills("测试用户登录流程")
+        assert len(matched) >= 1
+        assert matched[0].name == "login"
+
+    def test_skill_manager_format_skills_for_prompt(self, tmp_path):
+        """测试 SkillManager 格式化 Skills 为提示词"""
+        from src.skills.manager import SkillManager
+
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        (skills_dir / "login.md").write_text(
+            "# 登录测试 Skill\n\n## 测试要点\n1. 定位登录按钮\n",
+            encoding="utf-8",
+        )
+
+        manager = SkillManager(skills_dir=str(skills_dir))
+        matched = manager.match_skills("登录")
+        prompt_text = manager.format_skills_for_prompt(matched)
+        assert "登录测试 Skill" in prompt_text
+        assert "---" in prompt_text
+
+    def test_skill_manager_get_skill(self, tmp_path):
+        """测试按名称获取 Skill"""
+        from src.skills.manager import SkillManager
+
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        (skills_dir / "login.md").write_text("# 登录\n", encoding="utf-8")
+
+        manager = SkillManager(skills_dir=str(skills_dir))
+        skill = manager.get_skill("login")
+        assert skill is not None
+        assert skill.name == "login"
+
+        # 不存在的 Skill
+        assert manager.get_skill("nonexistent") is None
+
+    def test_skill_manager_empty_dir(self, tmp_path):
+        """测试空目录时 SkillManager 正常处理"""
+        from src.skills.manager import SkillManager
+
+        skills_dir = tmp_path / "empty_skills"
+        skills_dir.mkdir()
+
+        manager = SkillManager(skills_dir=str(skills_dir))
+        assert len(manager.list_skills()) == 0
+        assert manager.match_skills("测试") == []
+
+    def test_skill_manager_nonexistent_dir(self, tmp_path):
+        """测试不存在的目录时 SkillManager 正常处理"""
+        from src.skills.manager import SkillManager
+
+        manager = SkillManager(skills_dir=str(tmp_path / "nonexistent"))
+        assert len(manager.list_skills()) == 0
+
+    def test_skill_manager_reload(self, tmp_path):
+        """测试 SkillManager 重新加载"""
+        from src.skills.manager import SkillManager
+
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        (skills_dir / "login.md").write_text("# 登录\n", encoding="utf-8")
+
+        manager = SkillManager(skills_dir=str(skills_dir))
+        assert len(manager.list_skills()) == 1
+
+        # 新增文件后重新加载
+        (skills_dir / "search.md").write_text("# 搜索\n", encoding="utf-8")
+        manager.reload()
+        assert len(manager.list_skills()) == 2
+
+
+# ============================================================
+# BaseAgent Skill 注入测试
+# ============================================================
+
+
+class TestBaseAgentSkillInjection:
+    """Agent 基类 Skill 注入测试"""
+
+    def test_set_skill_context(self):
+        """测试设置 Skill 知识上下文"""
+        from src.agents.base import BaseAgent
+
+        class TestAgent(BaseAgent):
+            def run(self, **kwargs):
+                return {}
+
+        agent = TestAgent(name='test')
+        agent.set_skill_context("登录相关技能知识")
+        assert agent.skill_context == "登录相关技能知识"
+
+    def test_build_system_message_without_skill(self):
+        """测试无 Skill 知识时构建系统消息"""
+        from src.agents.base import BaseAgent
+
+        class TestAgent(BaseAgent):
+            def run(self, **kwargs):
+                return {}
+
+        agent = TestAgent(name='test')
+        msg = agent._build_system_message()
+        assert msg == agent.system_prompt
+
+    def test_build_system_message_with_skill(self):
+        """测试有 Skill 知识时构建系统消息"""
+        from src.agents.base import BaseAgent
+
+        class TestAgent(BaseAgent):
+            def run(self, **kwargs):
+                return {}
+
+        agent = TestAgent(name='test')
+        agent.set_skill_context("登录测试要点：1. 定位登录按钮")
+        msg = agent._build_system_message()
+        assert "相关技能知识" in msg
+        assert "登录测试要点" in msg
+
+    def test_clear_skill_context(self):
+        """测试清除 Skill 知识上下文"""
+        from src.agents.base import BaseAgent
+
+        class TestAgent(BaseAgent):
+            def run(self, **kwargs):
+                return {}
+
+        agent = TestAgent(name='test')
+        agent.set_skill_context("技能知识")
+        agent.set_skill_context(None)
+        assert agent.skill_context is None
+        msg = agent._build_system_message()
+        assert msg == agent.system_prompt
+
+
+# ============================================================
+# 混合感知策略测试
+# ============================================================
+
+
+class TestHybridPerception:
+    """混合感知策略测试"""
+
+    def test_perception_mode_enum(self):
+        """测试感知模式枚举值"""
+        from src.utils.perception import PerceptionMode
+
+        assert PerceptionMode.UI_TREE.value == "ui_tree"
+        assert PerceptionMode.SCREENSHOT.value == "screenshot"
+        assert PerceptionMode.HYBRID.value == "hybrid"
+
+    def test_perception_result_dataclass(self):
+        """测试感知结果数据结构"""
+        from src.utils.perception import PerceptionMode, PerceptionResult
+
+        result = PerceptionResult(
+            ui_tree="tree_data",
+            screenshot_b64="base64_data",
+            mode=PerceptionMode.HYBRID,
+            ui_tree_available=True,
+            screenshot_available=False,
+            ui_tree_size_bytes=1024,
+            screenshot_size_bytes=0,
+        )
+        assert result.ui_tree_available is True
+        assert result.screenshot_available is False
+        assert result.mode == PerceptionMode.HYBRID
+
+    def test_estimate_token_savings(self):
+        """测试 Token 节省估算"""
+        from src.utils.perception import (
+            HybridPerception,
+            PerceptionMode,
+            PerceptionResult,
+        )
+
+        result = PerceptionResult(
+            ui_tree="tree_data",
+            screenshot_b64="",
+            mode=PerceptionMode.UI_TREE,
+            ui_tree_available=True,
+            screenshot_available=False,
+            ui_tree_size_bytes=5000,
+            screenshot_size_bytes=50000,
+        )
+
+        perception = HybridPerception()
+        savings = perception.estimate_token_savings(result)
+        assert savings['savings_ratio'] > 0
+        assert savings['mode_used'] == 'ui_tree'
+
+    @pytest.mark.asyncio
+    async def test_perceive_without_mcp_client(self):
+        """测试无 MCP 客户端时的感知行为"""
+        from src.utils.perception import HybridPerception, PerceptionMode
+
+        perception = HybridPerception(mcp_client=None)
+        result = await perception.perceive("emulator-5554", mode=PerceptionMode.HYBRID)
+
+        assert result.ui_tree_available is False
+        assert result.screenshot_available is False
+
+
+# ============================================================
+# Token 成本监控测试
+# ============================================================
+
+
+class TestTokenCostAlert:
+    """Token 成本告警测试"""
+
+    def test_cost_alert_triggers_on_threshold(self):
+        """测试累计成本超过阈值时触发告警"""
+        from src.utils.token_tracker import TokenTracker
+
+        alert_called = []
+        def mock_callback(info):
+            alert_called.append(info)
+
+        tracker = TokenTracker(
+            cost_alert_threshold=0.001,
+            cost_alert_callback=mock_callback,
+        )
+
+        # 添加一条超过阈值的记录
+        tracker.add_record(
+            model='gpt-4o',
+            model_tier='precise',
+            prompt_tokens=50000,
+            completion_tokens=10000,
+            operation='verify',
+        )
+
+        assert len(alert_called) == 1
+        assert alert_called[0]['event'] == 'cost_alert'
+        assert alert_called[0]['total_cost'] >= 0.001
+
+    def test_cost_alert_only_triggers_once(self):
+        """测试成本告警只触发一次"""
+        from src.utils.token_tracker import TokenTracker
+
+        alert_count = []
+        def mock_callback(info):
+            alert_count.append(1)
+
+        tracker = TokenTracker(
+            cost_alert_threshold=0.001,
+            cost_alert_callback=mock_callback,
+        )
+
+        # 添加多条记录
+        tracker.add_record(model='gpt-4o', model_tier='precise', prompt_tokens=50000, completion_tokens=10000, operation='op1')
+        tracker.add_record(model='gpt-4o', model_tier='precise', prompt_tokens=50000, completion_tokens=10000, operation='op2')
+
+        assert len(alert_count) == 1
+
+    def test_set_cost_alert_resets_flag(self):
+        """测试动态设置成本告警重置标志"""
+        from src.utils.token_tracker import TokenTracker
+
+        alert_count = []
+        def mock_callback(info):
+            alert_count.append(1)
+
+        tracker = TokenTracker(
+            cost_alert_threshold=0.001,
+            cost_alert_callback=mock_callback,
+        )
+
+        tracker.add_record(model='gpt-4o', model_tier='precise', prompt_tokens=50000, completion_tokens=10000, operation='op1')
+        assert len(alert_count) == 1
+
+        # 更新阈值，重置标志
+        tracker.set_cost_alert(threshold=10.0)
+        tracker.add_record(model='gpt-4o', model_tier='precise', prompt_tokens=50000, completion_tokens=10000, operation='op2')
+        # 新阈值未触发
+        assert len(alert_count) == 1
+
+
+# ============================================================
+# 测试报告生成器测试
+# ============================================================
+
+
+class TestReportGenerator:
+    """测试报告生成器测试"""
+
+    def _sample_data(self):
+        """创建测试报告样本数据。"""
+        return {
+            "task_id": "abc-123-def",
+            "test_goal": "测试登录功能",
+            "executed_steps": [
+                {"action": "点击登录按钮", "result": "成功", "passed": True},
+                {"action": "输入用户名", "result": "成功", "passed": True},
+                {"action": "输入密码", "result": "失败", "passed": False},
+            ],
+            # generate 签名期望 verifier_output（dict，含 passed/failure_reason），
+            # 不是 verification_details（list）
+            "verifier_output": {
+                "passed": False,
+                "failure_reason": "密码错误提示未出现",
+            },
+            "reviewer_output": {
+                "feedback": "部分步骤失败",
+                "final_verdict": "fail",
+                "quality_metrics": {},
+            },
+            "token_summary": {
+                "total_tokens": 12000,
+                "total_cost": 0.15,
+                "total_records": 8,
+            },
+            "duration": 45.2,
+            "device_name": "emulator-5554",
+        }
+
+    def test_generate_html_report(self, tmp_path):
+        """测试生成 HTML 格式报告"""
+        from src.utils.report_generator import ReportGenerator
+
+        generator = ReportGenerator(output_dir=str(tmp_path / "reports"))
+        data = self._sample_data()
+        path = generator.generate(**data, format="html")
+
+        assert path.endswith(".html")
+        content = open(path, encoding="utf-8").read()
+        assert "AI 自动化测试报告" in content
+        assert "测试登录功能" in content
+        assert "emulator-5554" in content
+
+    def test_generate_markdown_report(self, tmp_path):
+        """测试生成 Markdown 格式报告"""
+        from src.utils.report_generator import ReportGenerator
+
+        generator = ReportGenerator(output_dir=str(tmp_path / "reports"))
+        data = self._sample_data()
+        path = generator.generate(**data, format="markdown")
+
+        assert path.endswith(".md")
+        content = open(path, encoding="utf-8").read()
+        assert "AI 自动化测试报告" in content
+        assert "abc-123-def" in content
+
+    def test_generate_report_with_error(self, tmp_path):
+        """测试包含错误信息的报告"""
+        from src.utils.report_generator import ReportGenerator
+
+        generator = ReportGenerator(output_dir=str(tmp_path / "reports"))
+        data = self._sample_data()
+        data["error"] = "Appium Session 超时"
+        path = generator.generate(**data, format="html")
+
+        content = open(path, encoding="utf-8").read()
+        assert "错误信息" in content or "Appium" in content
+
+    def test_generate_invalid_format_raises_error(self, tmp_path):
+        """测试不支持的格式抛出 ValueError"""
+        from src.utils.report_generator import ReportGenerator
+
+        generator = ReportGenerator(output_dir=str(tmp_path / "reports"))
+        data = self._sample_data()
+        with pytest.raises(ValueError):
+            generator.generate(**data, format="pdf")
+
+    def test_generate_report_empty_steps(self, tmp_path):
+        """测试空步骤时的报告"""
+        from src.utils.report_generator import ReportGenerator
+
+        generator = ReportGenerator(output_dir=str(tmp_path / "reports"))
+        data = self._sample_data()
+        data["executed_steps"] = []
+        data["verifier_output"] = {}
+        path = generator.generate(**data, format="html")
+
+        content = open(path, encoding="utf-8").read()
+        assert "AI 自动化测试报告" in content
+
+
+# ============================================================
+# 告警通知器测试
+# ============================================================
+
+
+class TestNotifier:
+    """告警通知器测试"""
+
+    def test_notifier_disabled_when_no_urls(self):
+        """测试无 Webhook URL 时通知器禁用"""
+        from src.utils.notifier import Notifier
+
+        notifier = Notifier()
+        assert notifier.enabled is False
+
+    def test_notifier_enabled_with_feishu_url(self):
+        """测试配置飞书 URL 后通知器启用"""
+        from src.utils.notifier import Notifier
+
+        notifier = Notifier(feishu_webhook_url="https://open.feishu.cn/hook/test")
+        assert notifier.enabled is True
+
+    def test_notifier_enabled_with_slack_url(self):
+        """测试配置 Slack URL 后通知器启用"""
+        from src.utils.notifier import Notifier
+
+        notifier = Notifier(slack_webhook_url="https://hooks.slack.com/services/test")
+        assert notifier.enabled is True
+
+    def test_notify_test_completed_returns_empty_when_disabled(self):
+        """测试通知器禁用时返回空结果"""
+        from src.utils.notifier import Notifier
+
+        notifier = Notifier()
+        result = notifier.notify_test_completed(
+            task_id="test", test_goal="测试", verdict="pass", duration=10.0
+        )
+        assert result == {}
+
+    def test_notification_event_enum(self):
+        """测试通知事件枚举"""
+        from src.utils.notifier import NotificationEvent
+
+        assert NotificationEvent.TEST_COMPLETED.value == "test_completed"
+        assert NotificationEvent.TEST_FAILED.value == "test_failed"
+        assert NotificationEvent.COST_ALERT.value == "cost_alert"
+
+    def test_notification_channel_enum(self):
+        """测试通知渠道枚举"""
+        from src.utils.notifier import NotificationChannel
+
+        assert NotificationChannel.FEISHU.value == "feishu"
+        assert NotificationChannel.SLACK.value == "slack"
+
+
+# ============================================================
+# 性能基准测试模块测试
+# ============================================================
+
+
+class TestBenchmarkRunner:
+    """性能基准测试模块测试"""
+
+    def test_record_benchmark(self, tmp_path):
+        """测试记录基准数据"""
+        from src.utils.benchmark import BenchmarkRunner
+
+        runner = BenchmarkRunner(data_dir=str(tmp_path / "benchmarks"))
+        result = runner.record_benchmark(
+            task_id="test-1",
+            test_goal="测试登录",
+            duration=45.2,
+            step_count=5,
+            passed_steps=4,
+            total_tokens=12000,
+            total_cost=0.15,
+            verdict="pass",
+        )
+
+        assert result.task_id == "test-1"
+        assert result.pass_rate == 0.8
+        assert result.tokens_per_step == 2400.0
+        assert result.duration_per_step == 9.04
+
+    def test_get_summary(self, tmp_path):
+        """测试获取统计摘要"""
+        from src.utils.benchmark import BenchmarkRunner
+
+        runner = BenchmarkRunner(data_dir=str(tmp_path / "benchmarks"))
+        runner.record_benchmark(
+            task_id="test-1", test_goal="测试1",
+            duration=30.0, step_count=3, passed_steps=3,
+            total_tokens=9000, total_cost=0.1, verdict="pass",
+        )
+        runner.record_benchmark(
+            task_id="test-2", test_goal="测试2",
+            duration=60.0, step_count=5, passed_steps=4,
+            total_tokens=15000, total_cost=0.2, verdict="fail",
+        )
+
+        summary = runner.get_summary()
+        assert summary["total_runs"] == 2
+        assert summary["avg_duration"] == 45.0
+        assert summary["pass_count"] == 1
+        assert summary["fail_count"] == 1
+
+    def test_compare_with_baseline(self, tmp_path):
+        """测试与基准对比"""
+        from src.utils.benchmark import BenchmarkResult, BenchmarkRunner
+
+        runner = BenchmarkRunner(data_dir=str(tmp_path / "benchmarks"))
+        runner.record_benchmark(
+            task_id="test-1", test_goal="测试1",
+            duration=30.0, step_count=3, passed_steps=3,
+            total_tokens=9000, total_cost=0.1, verdict="pass",
+        )
+
+        result = BenchmarkResult(
+            task_id="test-2", test_goal="测试2",
+            duration=45.0, step_count=5, passed_steps=4,
+            pass_rate=0.8, total_tokens=12000, total_cost=0.15,
+            tokens_per_step=2400, cost_per_step=0.03,
+            duration_per_step=9.0, verdict="pass",
+        )
+
+        comparison = runner.compare_with_baseline(result)
+        assert comparison["comparison"] == "compared"
+        assert "duration_delta_pct" in comparison
+
+    def test_compare_with_baseline_no_history(self, tmp_path):
+        """测试无历史数据时的对比"""
+        from src.utils.benchmark import BenchmarkResult, BenchmarkRunner
+
+        runner = BenchmarkRunner(data_dir=str(tmp_path / "benchmarks_new"))
+        result = BenchmarkResult(
+            task_id="test-1", test_goal="测试1",
+            duration=30.0, step_count=3, passed_steps=3,
+            pass_rate=1.0, total_tokens=9000, total_cost=0.1,
+            tokens_per_step=3000, cost_per_step=0.033,
+            duration_per_step=10.0, verdict="pass",
+        )
+
+        comparison = runner.compare_with_baseline(result)
+        assert comparison["comparison"] == "no_baseline"
+
+    def test_benchmark_data_persistence(self, tmp_path):
+        """测试基准数据持久化"""
+        from src.utils.benchmark import BenchmarkRunner
+
+        data_dir = str(tmp_path / "benchmarks_persist")
+        runner1 = BenchmarkRunner(data_dir=data_dir)
+        runner1.record_benchmark(
+            task_id="test-1", test_goal="测试1",
+            duration=30.0, step_count=3, passed_steps=3,
+            total_tokens=9000, total_cost=0.1, verdict="pass",
+        )
+
+        # 新实例加载同一目录
+        runner2 = BenchmarkRunner(data_dir=data_dir)
+        summary = runner2.get_summary()
+        assert summary["total_runs"] == 1

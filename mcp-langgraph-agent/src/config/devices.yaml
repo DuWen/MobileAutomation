@@ -1,19 +1,30 @@
 # 设备池配置文件
-# 定义可用的移动端测试设备列表，每个设备包含平台、UDID、端口等连接信息。
+# 定义可用的移动端测试设备列表，每个设备包含平台、UDID、端口及 Capabilities。
+# 对齐架构设计文档格式。Appium 处理 UI 交互，adb/idevice 处理系统级操作。
 
 devices:
-  - id: device_1
-    platform: Android
-    udid: emulator-5554
-    systemPort: 8200
-    wdaPort: 8100
-    name: Android 14 Emulator
-    description: "Android 14 模拟器，用于主流程测试"
+  # ── Android 设备 ──────────────────────────────────────────────
+  - name: "Pixel_7_API_34"
+    platform: "Android"
+    udid: "emulator-5554"
+    appium_port: 4723
+    capabilities:
+      automationName: "UiAutomator2"
+      platformVersion: "14"
+      appPackage: ""
+      appActivity: ""
+      noReset: true
+      newCommandTimeout: 300
 
-  - id: device_2
-    platform: Android
-    udid: emulator-5556
-    systemPort: 8201
-    wdaPort: 8101
-    name: Android 11 Emulator
-    description: "Android 11 模拟器，用于兼容性测试"
+  # ── iOS 设备模版（取消注释并填入真实值即可使用） ──────────────
+  # - name: "iPhone_15_Pro"
+  #   platform: "iOS"
+  #   udid: "00008101-000A1C1A3C08001E"   # 通过 Xcode -> Window -> Devices 获取
+  #   appium_port: 4724                     # 多设备时使用不同端口
+  #   capabilities:
+  #     automationName: "XCUITest"
+  #     platformVersion: "17.0"
+  #     bundleId: ""                        # iOS App 的 Bundle ID
+  #     noReset: true
+  #     newCommandTimeout: 300
+  #     wdaLocalPort: 8100                  # WebDriverAgent 端口

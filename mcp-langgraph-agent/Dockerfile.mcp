@@ -1,8 +1,6 @@
-"""
-MCP Server Dockerfile
-
-基于 python:3.11-slim 构建 MCP 协议服务镜像，用于移动端自动化测试的 MCP 工具调用。
-"""
+# MCP Server Dockerfile
+#
+# 基于 python:3.11-slim 构建 MCP 协议服务镜像，用于移动端自动化测试的 MCP 工具调用。
 
 # 使用 Python 3.11 精简版作为基础镜像
 FROM python:3.11-slim
@@ -32,4 +30,4 @@ COPY pyproject.toml .
 EXPOSE 8000
 
 # 启动 MCP Server
-CMD ["python", "-m", "src.mcp_server"]
+CMD ["python", "-m", "src.mobile_mcp.server"]

@@ -7,11 +7,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
-from src.graph.state import AgentState
 from src.agents.executor import ExecutorAgent
 from src.agents.llm import ModelRouter
+from src.graph.state import AgentState
 from src.utils.token_tracker import TokenTracker
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ def get_executor_agent(
     return _executor_agent
 
 
-async def executor_node(state: AgentState) -> Dict[str, Any]:
+async def executor_node(state: AgentState) -> dict[str, Any]:
     """执行节点的主函数。
 
     调用 ExecutorAgent 执行当前测试步骤，通过 MCP 工具操作设备，
@@ -61,7 +61,7 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
     - 验证失败后重试，current_step_index 不变，retry_count 由 verifier 递增
 
     Args:
-        state: 当前 Agent 状态，包含 test_steps、current_step_index、
+        state: 当前 Agent 状态，包含 test_plan、current_step_index、
                ui_tree、screenshot_b64 等字段。
 
     Returns:
@@ -70,48 +70,77 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
             - node_outputs: 更新后的节点输出缓存
             - messages: 新增的对话消息
             - total_tokens_used: 本轮消耗的 Token 数
-            - error: 执行出错时填充的错误信息
+            - failure_reason: 执行出错时填充的错误信息
     """
     current_step_index: int = state.get('current_step_index', 0)
-    test_steps: List[str] = state.get('test_steps', [])
+    test_plan: list = state.get('test_plan', [])
 
     # 边界检查
-    if current_step_index >= len(test_steps):
+    if current_step_index >= len(test_plan):
         logger.warning(
-            f"[Executor] 步骤索引 {current_step_index} 超出范围，总步骤数 {len(test_steps)}"
+            f"[Executor] 步骤索引 {current_step_index} 超出范围，总步骤数 {len(test_plan)}"
         )
         return {
-            'error': f"步骤索引 {current_step_index} 超出范围",
+            'failure_reason': f"步骤索引 {current_step_index} 超出范围",
             'node_outputs': {
                 **state.get('node_outputs', {}),
                 'executor': {'error': '索引越界'},
             },
         }
 
-    current_step: str = test_steps[current_step_index]
+    # 获取当前步骤（兼容 str 和 dict 两种格式）
+    step_item = test_plan[current_step_index]
+    if isinstance(step_item, dict):
+        step_desc: str = step_item.get('action', '') or step_item.get('step', str(step_item))
+    else:
+        step_desc = str(step_item)
     logger.info(
-        f"[Executor] 开始执行步骤 [{current_step_index + 1}/{len(test_steps)}]: {current_step}"
+        f"[Executor] 开始执行步骤 [{current_step_index + 1}/{len(test_plan)}]: {step_desc}"
     )
 
     # 获取 Agent 实例
     agent: ExecutorAgent = get_executor_agent()
 
+    # 注入 Skill 知识上下文（由 Explorer 节点匹配并传递）
+    skill_context: str = state.get('skill_context', '')
+    if skill_context:
+        agent.set_skill_context(skill_context)
+
+    # ── 关键改动：每步执行前刷新 UI 树 ──────────────────────────
+    # 解决多级页面跳转后元素定位失败问题：
+    # 旧实现使用 Explorer 阶段采集的首页 UI 树，跳转到二/三级页面后
+    # LLM 仍按旧 UI 树定位元素，导致 tap_element 找不到目标。
+    # 现在每步执行前重新获取当前页面的 UI 树，确保 LLM 看到的是真实当前界面。
+    fresh_ui_tree: str = state.get('ui_tree', '')
+    device_name: str = state.get('device_name', '')
+    if agent.mcp_client and device_name:
+        try:
+            ui_result = await agent.mcp_client.call_tool(
+                'get_ui_tree', {'device_name': device_name, 'compress': True}
+            )
+            if isinstance(ui_result, dict) and ui_result.get('success', False):
+                fresh_ui_tree = ui_result.get('data', {}).get('tree', fresh_ui_tree)
+                logger.info(f"[Executor] 步骤 [{current_step_index + 1}] 已刷新 UI 树")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[Executor] 刷新 UI 树失败，使用旧 UI 树: {e}")
+
     # 调用 Agent 执行步骤
-    execution_record: Dict[str, Any] = await agent.run(
-        current_step=current_step,
+    execution_record: dict[str, Any] = await agent.run(
+        current_step=step_desc,
         current_step_index=current_step_index,
-        ui_tree=state.get('ui_tree', ''),
+        ui_tree=fresh_ui_tree,
         screenshot_b64=state.get('screenshot_b64', ''),
-        test_plan=state.get('test_plan', {}),
+        test_plan=test_plan,
         executed_steps=state.get('executed_steps', []),
+        device_name=device_name,
     )
 
     # 获取本轮 Token 消耗
-    token_summary: Dict[str, Any] = agent.get_token_summary()
+    token_summary: dict[str, Any] = agent.get_token_summary()
     tokens_used: int = token_summary.get('total_tokens', 0)
 
     logger.info(
-        f"[Executor] 步骤 [{current_step_index + 1}/{len(test_steps)}] 执行完成，"
+        f"[Executor] 步骤 [{current_step_index + 1}/{len(test_plan)}] 执行完成，"
         f"结果: {execution_record.get('result', '未知')}"
     )
 
@@ -121,8 +150,9 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
             **state.get('node_outputs', {}),
             'executor': execution_record,
         },
+        # 同步更新 state.ui_tree，让后续 verifier 看到最新界面
+        'ui_tree': fresh_ui_tree,
         'messages': [
-            *state.get('messages', []),
             {
                 'role': 'assistant',
                 'content': (

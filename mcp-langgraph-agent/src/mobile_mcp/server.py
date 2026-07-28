@@ -8,7 +8,6 @@ MCP Server 实现模块
 """
 
 import logging
-from typing import Dict
 
 from mcp.server.fastmcp import FastMCP
 
@@ -76,7 +75,7 @@ class MobileAutomationServer(FastMCP):
         """从 YAML 配置文件加载设备列表到 DeviceManager。
 
         解析设备配置文件，将设备注册到 DeviceManager 的预配置列表中，
-        方便后续快速连接。
+        方便后续快速连接。对齐设计文档的 devices.yaml 格式。
 
         Args:
             config_path: 设备配置文件路径（YAML 格式）。
@@ -88,18 +87,24 @@ class MobileAutomationServer(FastMCP):
                 data = yaml.safe_load(f)
             devices = data.get("devices", [])
             for dev in devices:
+                # 从 capabilities 子对象中提取 appPackage/appActivity
+                caps = dev.get("capabilities", {})
                 self._device_manager.register_device_config(
-                    device_id=dev.get("id", ""),
+                    device_id=dev.get("name", ""),
                     name=dev.get("name", ""),
                     platform=dev.get("platform", "Android"),
                     udid=dev.get("udid", ""),
-                    system_port=dev.get("systemPort", 8200),
-                    wda_port=dev.get("wdaPort", 8100),
+                    system_port=caps.get("systemPort", 8200),
+                    wda_port=caps.get("wdaPort", 8100),
+                    app_package=caps.get("appPackage", ""),
+                    app_activity=caps.get("appActivity", ""),
+                    appium_port=dev.get("appium_port", 4723),
+                    capabilities=caps,
                 )
             logger.info("从 %s 加载了 %d 台设备配置", config_path, len(devices))
         except FileNotFoundError:
             logger.warning("设备配置文件 %s 未找到，跳过设备预加载", config_path)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("加载设备配置失败: %s", e)
 
     def _register_tools(self) -> None:
@@ -112,24 +117,41 @@ class MobileAutomationServer(FastMCP):
 
         @self.tool(
             name="connect_device",
-            description="连接指定名称的设备，建立 Appium WebDriver 会话",
+            description="连接移动设备并启动指定 App，建立 Appium WebDriver 会话",
         )
-        def connect_device(device_name: str) -> Dict:
-            """连接指定名称的设备。
+        def connect_device(
+            platform: str,
+            device_name: str,
+            app_package: str = "",
+            app_activity: str = "",
+            appium_port: int = 4723,
+        ) -> dict:
+            """连接移动设备并启动指定 App。
 
-            建立与移动设备的 Appium 连接，初始化 WebDriver 会话。
-            支持从预加载的设备配置中获取连接参数。
+            通过 Appium WebDriver 建立与设备的连接，初始化会话。
+            支持 Android 和 iOS 设备，参数缺失时自动从预配置补充。
 
             Args:
-                device_name: 设备名称/标识符（预配置的设备 ID 或 udid）。
+                platform: 平台类型，"Android" 或 "iOS"。
+                device_name: 设备名称或 UDID。
+                app_package: Android 包名 或 iOS bundle ID。
+                app_activity: Android 启动 Activity（iOS 可留空）。
+                appium_port: Appium Server 端口，默认 4723。
 
             Returns:
                 Dict: {"success": bool, "data": {...}} 格式的响应。
                     success 为 True 表示连接成功，data 包含设备信息。
             """
-            result = self._device_manager.connect_device(device_name)
+            result = self._device_manager.connect_device(
+                platform=platform,
+                device_name=device_name,
+                app_package=app_package,
+                app_activity=app_activity,
+                appium_port=appium_port,
+            )
             logger.info(
-                "connect_device(%s) => success=%s",
+                "connect_device(%s, %s) => success=%s",
+                platform,
                 device_name,
                 result.get("success"),
             )
@@ -139,7 +161,7 @@ class MobileAutomationServer(FastMCP):
             name="disconnect_device",
             description="断开指定名称的设备连接，关闭 WebDriver 会话",
         )
-        def disconnect_device(device_name: str) -> Dict:
+        def disconnect_device(device_name: str) -> dict:
             """断开指定名称的设备连接。
 
             关闭设备的 Appium WebDriver 会话并从连接池中移除。
@@ -162,7 +184,7 @@ class MobileAutomationServer(FastMCP):
             name="get_device_info",
             description="获取指定设备的详细信息，包括系统版本、屏幕尺寸等",
         )
-        def get_device_info(device_name: str) -> Dict:
+        def get_device_info(device_name: str) -> dict:
             """获取指定设备的详细信息。
 
             查询当前连接设备的系统信息、屏幕尺寸、平台版本等。
@@ -175,14 +197,14 @@ class MobileAutomationServer(FastMCP):
                     success 为 True 时 data 包含设备详细信息。
             """
             result = self._device_manager.get_device_info(device_name)
-            # 脱敏后再返回
-            return result
+            # 脱敏后再返回，防止设备序列号等敏感信息泄露
+            return redact_dict(result)
 
         @self.tool(
             name="list_devices",
             description="列出所有已配置的设备及其连接状态",
         )
-        def list_devices() -> Dict:
+        def list_devices() -> dict:
             """列出所有已配置的设备及其连接状态。
 
             返回预配置的设备列表和当前连接池中的设备信息。
@@ -196,26 +218,36 @@ class MobileAutomationServer(FastMCP):
 
         @self.tool(
             name="tap_element",
-            description="在设备屏幕指定坐标位置执行点击操作",
+            description="通过定位策略查找并点击元素，支持 id/xpath/accessibility_id/text 定位",
         )
-        def tap_element(device_name: str, x: int, y: int) -> Dict:
-            """在指定坐标位置执行点击操作。
+        def tap_element(
+            device_name: str,
+            by: str,
+            value: str,
+            use_bounds_fallback: bool = True,
+        ) -> dict:
+            """通过定位策略查找并点击元素。
+
+            支持多种定位策略，找不到元素时可自动降级为坐标点击。
 
             Args:
                 device_name: 设备名称/标识符。
-                x: 点击位置的 x 坐标（像素）。
-                y: 点击位置的 y 坐标（像素）。
+                by: 定位方式 — "id" | "xpath" | "accessibility_id" | "text"。
+                value: 定位值。
+                use_bounds_fallback: 找不到元素时是否尝试用文本匹配 bounds 降级点击。
 
             Returns:
                 Dict: {"success": bool, "data": {...}} 格式的响应。
             """
-            return self._ui_toolkit.tap_element(device_name, x, y)
+            return self._ui_toolkit.tap_element(
+                device_name, by, value, use_bounds_fallback
+            )
 
         @self.tool(
             name="tap_by_text",
             description="通过文本内容查找元素并执行点击操作",
         )
-        def tap_by_text(device_name: str, text: str) -> Dict:
+        def tap_by_text(device_name: str, text: str) -> dict:
             """通过文本内容查找元素并点击。
 
             Args:
@@ -229,24 +261,30 @@ class MobileAutomationServer(FastMCP):
 
         @self.tool(
             name="input_text",
-            description="向指定元素输入文本内容，先清除再输入",
+            description="向指定元素输入文本内容，先清除再输入，支持 id/xpath/accessibility_id/text 定位，敏感字段自动脱敏记录",
         )
         def input_text(
-            device_name: str, element_id: str, text: str
-        ) -> Dict:
+            device_name: str, by: str, value: str, text: str
+        ) -> dict:
             """向指定元素输入文本内容。
+
+            输入操作会被记录，敏感信息（如密码）在日志和返回值中自动脱敏。
+            定位方式与 tap_element 一致：id / xpath / accessibility_id / text。
 
             Args:
                 device_name: 设备名称/标识符。
-                element_id: 元素标识符（accessibility_id / xpath / class_name）。
+                by: 定位方式 — "id" | "xpath" | "accessibility_id" | "text"。
+                value: 定位值。
                 text: 要输入的文本内容。
 
             Returns:
                 Dict: {"success": bool, "data": {...}} 格式的响应。
             """
-            return self._ui_toolkit.input_text(
-                device_name, element_id, text
+            result = self._ui_toolkit.input_text(
+                device_name, by, value, text
             )
+            # 对返回结果进行脱敏处理，防止敏感信息泄露
+            return redact_dict(result)
 
         @self.tool(
             name="swipe",
@@ -259,7 +297,7 @@ class MobileAutomationServer(FastMCP):
             end_x: int,
             end_y: int,
             duration: int = 500,
-        ) -> Dict:
+        ) -> dict:
             """在设备屏幕上执行滑动操作。
 
             Args:
@@ -283,7 +321,7 @@ class MobileAutomationServer(FastMCP):
         )
         def long_press(
             device_name: str, x: int, y: int, duration: int = 1000
-        ) -> Dict:
+        ) -> dict:
             """在指定坐标位置执行长按操作。
 
             Args:
@@ -301,7 +339,7 @@ class MobileAutomationServer(FastMCP):
             name="press_key",
             description="按下设备物理或系统按键（如返回键、Home 键、Enter 键）",
         )
-        def press_key(device_name: str, key_name: str) -> Dict:
+        def press_key(device_name: str, key_name: str) -> dict:
             """按下设备物理或系统按键。
 
             支持常见的 Android/iOS 系统按键操作。
@@ -323,7 +361,7 @@ class MobileAutomationServer(FastMCP):
             device_name: str,
             direction: str = "down",
             distance: float = 0.5,
-        ) -> Dict:
+        ) -> dict:
             """在设备屏幕上执行方向滚动操作。
 
             Args:
@@ -343,8 +381,8 @@ class MobileAutomationServer(FastMCP):
             description="等待指定元素在设备屏幕中出现并可见",
         )
         def wait_for_element(
-            device_name: str, selector: Dict, timeout: int = 10
-        ) -> Dict:
+            device_name: str, selector: dict, timeout: int = 10
+        ) -> dict:
             """等待指定元素出现。
 
             Args:
@@ -365,7 +403,7 @@ class MobileAutomationServer(FastMCP):
             name="take_screenshot",
             description="获取设备当前屏幕截图，返回 base64 编码的图片数据",
         )
-        def take_screenshot(device_name: str) -> Dict:
+        def take_screenshot(device_name: str) -> dict:
             """获取设备当前屏幕截图。
 
             Args:
@@ -381,19 +419,23 @@ class MobileAutomationServer(FastMCP):
             description="获取设备当前页面的 UI 无障碍树结构（压缩后的 JSON 格式）",
         )
         def get_ui_tree(
-            device_name: str, compress: bool = True
-        ) -> Dict:
+            device_name: str, compress: bool = True, aggressive: bool = False
+        ) -> dict:
             """获取设备当前页面的 UI 无障碍树结构。
 
             Args:
                 device_name: 设备名称/标识符。
                 compress: 是否压缩输出（使用智能压缩器），默认为 True。
+                aggressive: 是否启用激进过滤模式，过滤无交互/无文本的装饰性
+                    叶子节点（如纯装饰 ImageView）。默认 False。启用后可
+                    进一步降低 Token 消耗，但状态语义类（ProgressBar/Switch/
+                    TextView 等）始终保留。仅在 compress=True 时生效。
 
             Returns:
                 Dict: {"success": bool, "data": {"tree": "...", ...}}。
             """
             return self._vision_toolkit.get_ui_tree(
-                device_name, compress
+                device_name, compress, aggressive=aggressive
             )
 
         # ---- 断言工具 ----
@@ -404,7 +446,7 @@ class MobileAutomationServer(FastMCP):
         )
         def assert_text_visible(
             device_name: str, text: str, timeout: int = 10
-        ) -> Dict:
+        ) -> dict:
             """断言指定文本在设备屏幕上可见。
 
             Args:
@@ -425,8 +467,8 @@ class MobileAutomationServer(FastMCP):
             description="断言指定元素在设备屏幕上存在",
         )
         def assert_element_exists(
-            device_name: str, selector: Dict
-        ) -> Dict:
+            device_name: str, selector: dict
+        ) -> dict:
             """断言指定元素存在。
 
             Args:
@@ -447,7 +489,7 @@ class MobileAutomationServer(FastMCP):
         )
         def assert_page_contains(
             device_name: str, text: str
-        ) -> Dict:
+        ) -> dict:
             """断言当前页面源包含指定文本内容。
 
             通过检查页面源（page source）中是否包含目标文本进行断言，

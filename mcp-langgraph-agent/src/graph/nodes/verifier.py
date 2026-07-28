@@ -8,17 +8,20 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
-from src.graph.state import AgentState
-from src.agents.verifier import VerifierAgent
 from src.agents.llm import ModelRouter
+from src.agents.verifier import VerifierAgent
+from src.graph.state import AgentState
 from src.utils.token_tracker import TokenTracker
 
 logger = logging.getLogger(__name__)
 
 # 全局 Agent 实例缓存（延迟初始化）
 _verifier_agent: VerifierAgent | None = None
+
+# 最大重试次数（对齐设计文档工作流拓扑）
+MAX_RETRIES = 3
 
 
 def get_verifier_agent(
@@ -45,7 +48,7 @@ def get_verifier_agent(
     return _verifier_agent
 
 
-async def verifier_node(state: AgentState) -> Dict[str, Any]:
+async def verifier_node(state: AgentState) -> dict[str, Any]:
     """验证节点的主函数。
 
     调用 VerifierAgent 验证上一步执行结果，并根据验证结果更新步骤索引和重试计数：
@@ -59,30 +62,22 @@ async def verifier_node(state: AgentState) -> Dict[str, Any]:
 
     Returns:
         dict: 包含以下字段的字典，用于更新 AgentState：
-            - verification_passed: 验证是否通过
-            - verification_details: 新增的验证详情列表
+            - verification_result: 验证是否通过（对齐 AgentState 字段名）
+            - failure_reason: 验证失败原因
             - current_step_index: 验证通过时递增，失败时不变
             - retry_count: 验证失败时递增，通过时重置为 0
             - node_outputs: 更新后的节点输出缓存
             - messages: 新增的对话消息
             - total_tokens_used: 本轮消耗的 Token 数
     """
-    executed_steps: List[dict] = state.get('executed_steps', [])
+    executed_steps: list[dict] = state.get('executed_steps', [])
 
     # 边界检查
     if not executed_steps:
         logger.warning("[Verifier] 没有已执行步骤可供验证")
         return {
-            'verification_passed': False,
-            'verification_details': [
-                {
-                    'check': '存在已执行步骤',
-                    'expected': True,
-                    'actual': False,
-                    'passed': False,
-                    'evidence': '无执行记录',
-                },
-            ],
+            'verification_result': False,
+            'failure_reason': '无执行记录',
             'node_outputs': {
                 **state.get('node_outputs', {}),
                 'verifier': {'error': '无执行记录'},
@@ -93,26 +88,96 @@ async def verifier_node(state: AgentState) -> Dict[str, Any]:
     last_execution: dict = executed_steps[-1]
     current_step: str = last_execution.get('step', '')
     step_index: int = last_execution.get('step_index', 0)
+    execution_passed: bool = last_execution.get('passed', False)
     logger.info(f"[Verifier] 开始验证步骤 [{step_index + 1}]: {current_step}")
+
+    # 快速路径：如果 MCP 调用全部失败，直接判定验证失败，不依赖 LLM 可能的幻觉
+    if not execution_passed:
+        mcp_calls: list = last_execution.get('mcp_calls', [])
+        failed_info = ''
+        if mcp_calls:
+            failed_tools = [
+                f"{c.get('tool', '?')}: {c.get('error', '') or c.get('result', {}).get('data', {}).get('message', '')}"
+                for c in mcp_calls if not c.get('success', False)
+            ]
+            failed_info = '; '.join(failed_tools)
+
+        logger.warning(
+            f"[Verifier] 步骤 [{step_index + 1}] MCP 执行失败，直接判定验证失败: {failed_info}"
+        )
+
+        # 验证失败：保持步骤索引不变，递增重试计数
+        current_step_index: int = state.get('current_step_index', 0)
+        retry_count: int = state.get('retry_count', 0) + 1
+
+        return {
+            'verification_result': False,
+            'failure_reason': f"MCP 工具调用失败: {failed_info}" if failed_info else "步骤执行失败",
+            'current_step_index': current_step_index,
+            'retry_count': retry_count,
+            'node_outputs': {
+                **state.get('node_outputs', {}),
+                'verifier': {
+                    'passed': False,
+                    'failure_reason': f"MCP 工具调用失败: {failed_info}" if failed_info else "步骤执行失败",
+                    'overall_status': 'failed',
+                    'summary': f"步骤 [{step_index + 1}] MCP 执行失败，跳过 LLM 验证",
+                    'suggestions': ['建议检查元素定位参数是否正确', '建议确认页面是否已加载完成'],
+                },
+            },
+            'messages': [
+                {
+                    'role': 'assistant',
+                    'content': f"验证步骤 {step_index + 1}: 失败 (MCP 执行失败)",
+                },
+            ],
+            'total_tokens_used': state.get('total_tokens_used', 0),
+        }
 
     # 获取 Agent 实例
     agent: VerifierAgent = get_verifier_agent()
 
+    # MCP 执行成功后，获取最新 UI 数据供 LLM 验证
+    # 否则 LLM 看到的是执行前的旧状态，会误判
+    fresh_ui_tree: str = state.get('ui_tree', '')
+    fresh_screenshot_b64: str = state.get('screenshot_b64', '')
+
+    if execution_passed:
+        try:
+            from src.graph.nodes.executor import get_executor_agent
+            executor_agent = get_executor_agent()
+            device_name: str = state.get('device_name', '')
+
+            if executor_agent.mcp_client and device_name:
+                # 获取最新 UI 树
+                ui_result = await executor_agent.mcp_client.call_tool(
+                    'get_ui_tree', {'device_name': device_name, 'compress': True}
+                )
+                if isinstance(ui_result, dict) and ui_result.get('success', False):
+                    fresh_ui_tree = ui_result.get('data', {}).get('tree', fresh_ui_tree)
+                    logger.info("[Verifier] 已获取最新 UI 树用于验证")
+
+                # 获取最新截图
+                sc_result = await executor_agent.mcp_client.call_tool(
+                    'take_screenshot', {'device_name': device_name}
+                )
+                if isinstance(sc_result, dict) and sc_result.get('success', False):
+                    fresh_screenshot_b64 = sc_result.get('data', {}).get('screenshot', fresh_screenshot_b64)
+                    logger.info("[Verifier] 已获取最新截图用于验证")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[Verifier] 获取最新 UI 数据失败，使用旧数据: {e}")
+
     # 调用 Agent 执行验证
-    verify_result: Dict[str, Any] = await agent.run(
+    verify_result: dict[str, Any] = await agent.run(
         execution_record=last_execution,
-        ui_tree=state.get('ui_tree', ''),
-        screenshot_b64=state.get('screenshot_b64', ''),
-        test_plan=state.get('test_plan', {}),
-        verification_points=(
-            state.get('test_plan', {}).get('expected_results', [])
-            if state.get('test_plan') else []
-        ),
+        ui_tree=fresh_ui_tree,
+        screenshot_b64=fresh_screenshot_b64,
+        test_plan=state.get('test_plan', []),
     )
 
     # 提取验证结果
     verification_passed: bool = verify_result.get('verification_passed', False)
-    verification_details: List[dict] = verify_result.get('verification_details', [])
+    failure_reason: str = verify_result.get('failure_reason', '')
 
     # 根据验证结果更新步骤索引和重试计数
     current_step_index: int = state.get('current_step_index', 0)
@@ -129,11 +194,11 @@ async def verifier_node(state: AgentState) -> Dict[str, Any]:
         # 验证失败：保持步骤索引不变，递增重试计数
         retry_count += 1
         logger.warning(
-            f"[Verifier] 验证失败，重试次数 {retry_count}/{state.get('max_retries', 3)}"
+            f"[Verifier] 验证失败，重试次数 {retry_count}/{MAX_RETRIES}"
         )
 
     # 获取本轮 Token 消耗
-    token_summary: Dict[str, Any] = agent.get_token_summary()
+    token_summary: dict[str, Any] = agent.get_token_summary()
     tokens_used: int = token_summary.get('total_tokens', 0)
 
     logger.info(
@@ -141,22 +206,21 @@ async def verifier_node(state: AgentState) -> Dict[str, Any]:
     )
 
     return {
-        'verification_passed': verification_passed,
-        'verification_details': verification_details,
+        'verification_result': verification_passed,
+        'failure_reason': failure_reason if not verification_passed else '',
         'current_step_index': current_step_index,
         'retry_count': retry_count,
         'node_outputs': {
             **state.get('node_outputs', {}),
             'verifier': {
                 'passed': verification_passed,
-                'details': verification_details,
+                'failure_reason': failure_reason,
                 'overall_status': verify_result.get('overall_status', ''),
                 'summary': verify_result.get('summary', ''),
                 'suggestions': verify_result.get('suggestions', []),
             },
         },
         'messages': [
-            *state.get('messages', []),
             {
                 'role': 'assistant',
                 'content': (
