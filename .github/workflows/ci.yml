@@ -24,6 +24,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# 显式声明权限：默认只读，PR 评论发布需要 pull-requests: write
+permissions:
+  contents: read
+  pull-requests: write
+
 defaults:
   run:
     working-directory: mcp-langgraph-agent
@@ -130,6 +135,7 @@ jobs:
       - name: 发布测试报告到 PR 评论
         if: github.event_name == 'pull_request' && matrix.python-version == '3.13'
         uses: actions/github-script@v7
+        continue-on-error: true  # PR 评论是辅助功能，失败不阻断 CI
         with:
           script: |
             const fs = require('fs');
@@ -209,6 +215,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint, test, verify, docker-build]
     if: always()
+    # 覆盖全局 working-directory，notify job 无需进入 mcp-langgraph-agent 目录
+    defaults:
+      run:
+        working-directory: .
     steps:
       - name: 判断 CI 整体状态
         id: ci_status
