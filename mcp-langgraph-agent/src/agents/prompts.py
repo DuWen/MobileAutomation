@@ -97,6 +97,11 @@ PLANNER_PROMPT = """## 任务目标
   - `action`: 操作类型（tap/swipe/input/scroll/back/wait/assert）
   - `target`: 操作目标元素描述
   - `params`: 操作参数（如输入文本、滑动方向等）
+    **重要 — 滑动方向必须使用物理方向**：
+    - 对 SeekBar/Slider 控件：`direction` 必须是物理方向 `"left"`/`"right"`/`"up"`/`"down"`，不要用 "downward"/"upward"/"降低"/"增大" 等语义词
+    - 水平 SeekBar：降低值用 `"left"`，增大值用 `"right"`
+    - 垂直 SeekBar：降低值用 `"down"`，增大值用 `"up"`
+    - 可附加 `intent` 字段说明语义意图（如 `"intent": "decrease_volume"`），但 `direction` 必须是物理方向
   - `expected_result`: 预期结果
   - `timeout`: 超时时间（秒）
 - `verification_points`: 验证点列表
@@ -137,14 +142,36 @@ EXECUTOR_PROMPT = """## 任务目标
 2. **input_text** — 向元素输入文本
    参数: device_name, by("id"|"xpath"|"accessibility_id"|"text"), value(定位值), text(要输入的文本)
 
-3. **swipe** — 滑动操作
+3. **swipe** — 坐标式滑动（从起点滑到终点，需要精确坐标）
    参数: device_name, start_x, start_y, end_x, end_y, duration(可选,默认500)
 
-4. **take_screenshot** — 截取当前屏幕
+4. **swipe_element** — 元素内方向滑动（适用于 SeekBar/Slider/开关等控件，无需坐标）
+   参数: device_name, by("id"|"xpath"|"accessibility_id"|"text"), value(定位值), direction("left"|"right"|"up"|"down"), percent(可选,0.0-1.0,默认0.8), duration(可选,默认500)
+
+5. **scroll** — 整页方向滚动（上/下/左/右）
+   参数: device_name, direction("up"|"down"|"left"|"right"), distance(可选,0.0-1.0,默认0.5)
+
+6. **take_screenshot** — 截取当前屏幕
    参数: device_name
 
-5. **assert_text_visible** — 断言文本可见
+7. **assert_text_visible** — 断言文本可见
    参数: device_name, expected_text, timeout(可选,默认10)
+
+**工具选择指南**:
+- 点击元素 → tap_element
+- 输入文本 → input_text
+- 整页滚动 → scroll
+- SeekBar/Slider 拖动 → swipe_element（通过元素定位+方向，无需坐标）
+- 精确坐标滑动 → swipe（需要明确坐标）
+
+**方向语义映射（关键）**:
+步骤描述中的 `direction` 可能是语义方向（如 "downward"/"upward"/"降低"/"增大"），
+必须根据控件类型转换为**物理方向**后再传给工具：
+- 水平 SeekBar/Slider：降低值 → `left`，增大值 → `right`
+- 垂直 SeekBar/Slider：降低值 → `down`，增大值 → `up`
+- 整页滚动：保持原方向 `up`/`down`/`left`/`right`
+
+**示例**：步骤描述 `direction: "downward"`（降低音量）+ 水平 SeekBar → 传给 swipe_element 的 `direction` 应为 `"left"`
 
 ## 定位策略说明
 - **id**: 使用 resource-id，如 "com.example:id/et_account"
@@ -193,6 +220,23 @@ EXECUTOR_PROMPT = """## 任务目标
       "params": {{
         "by": "text",
         "value": "登录"
+      }}
+    }}
+  ]
+}}
+```
+
+对于步骤 "向左拖动 Media volume 的 SeekBar (content-desc: Media volume)":
+```json
+{{
+  "tool_actions": [
+    {{
+      "tool": "swipe_element",
+      "params": {{
+        "by": "accessibility_id",
+        "value": "Media volume",
+        "direction": "left",
+        "percent": 0.8
       }}
     }}
   ]

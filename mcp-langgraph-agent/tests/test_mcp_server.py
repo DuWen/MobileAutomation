@@ -10,6 +10,7 @@ from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 from PIL import Image
+from selenium.common.exceptions import NoSuchElementException
 
 
 def _create_valid_screenshot_b64(width: int = 1080, height: int = 2400) -> str:
@@ -407,6 +408,48 @@ class TestUIToolkit:
         toolkit, mock_driver = self._setup_toolkit()
         result = toolkit.scroll("test_device", "diagonal")
         assert result["success"] is False
+
+    def test_swipe_element_left(self):
+        """测试元素内方向滑动（向左拖动 SeekBar）"""
+        toolkit, mock_driver = self._setup_toolkit()
+        mock_element = MagicMock()
+        mock_element.location = {"x": 100, "y": 500}
+        mock_element.size = {"width": 800, "height": 60}
+        mock_driver.find_element.return_value = mock_element
+        mock_driver.swipe.reset_mock()
+
+        result = toolkit.swipe_element(
+            "test_device", by="accessibility_id", value="Media volume",
+            direction="left", percent=0.8,
+        )
+        assert result["success"] is True
+        # 验证调用了 driver.swipe，且起终点在元素范围内
+        mock_driver.swipe.assert_called_once()
+        call_args = mock_driver.swipe.call_args[0]
+        start_x, start_y, end_x, end_y = call_args[:4]
+        # 向左滑动：start_x > end_x（从右滑向左）
+        assert start_x > end_x
+        # y 坐标应在元素范围内
+        assert 500 <= start_y <= 560
+
+    def test_swipe_element_not_found(self):
+        """测试元素内滑动时元素未找到"""
+        toolkit, mock_driver = self._setup_toolkit()
+        mock_driver.find_element.side_effect = NoSuchElementException()
+
+        result = toolkit.swipe_element(
+            "test_device", by="id", value="nonexistent",
+            direction="left",
+        )
+        assert result["success"] is False
+        assert "未找到" in result["data"]["message"]
+
+    def test_swipe_zero_distance(self):
+        """测试零距离滑动被拒绝"""
+        toolkit, mock_driver = self._setup_toolkit()
+        result = toolkit.swipe("test_device", 100, 200, 100, 200)
+        assert result["success"] is False
+        assert "相同" in result["data"]["message"]
 
     def test_wait_for_element_success(self):
         """测试等待元素出现"""

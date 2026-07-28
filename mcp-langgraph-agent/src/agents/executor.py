@@ -36,6 +36,7 @@ class ExecutorAgent(BaseAgent):
         'mobile_tap': 'tap_element',
         'mobile_input_text': 'input_text',
         'mobile_swipe': 'swipe',
+        'mobile_swipe_element': 'swipe_element',
         'mobile_click': 'tap_element',
         'mobile_type': 'input_text',
         'tap': 'tap_element',
@@ -43,6 +44,8 @@ class ExecutorAgent(BaseAgent):
         'input': 'input_text',
         'type': 'input_text',
         'swipe': 'swipe',
+        'swipe_element': 'swipe_element',
+        'drag_element': 'swipe_element',
         'scroll': 'scroll',
         'screenshot': 'take_screenshot',
         'get_ui_tree': 'get_ui_tree',
@@ -366,10 +369,12 @@ class ExecutorAgent(BaseAgent):
                 },
             })
         elif 'swipe' in step_lower or '滑动' in current_step:
-            calls.append({
-                'tool': 'swipe',
-                'params': {'device_name': device_name, 'start_x': 0, 'start_y': 0, 'end_x': 0, 'end_y': 0},
-            })
+            # 不再硬编码 0,0,0,0 坐标（会导致无效滑动但显示成功）
+            # swipe 需要精确坐标，推断路径无法获取，跳过让 LLM 通过 tool_actions 自行决定
+            logger.warning(
+                "[ExecutorAgent] swipe 操作需要精确坐标或元素定位，"
+                "推断路径无法生成有效参数，跳过推断"
+            )
 
         return calls
 

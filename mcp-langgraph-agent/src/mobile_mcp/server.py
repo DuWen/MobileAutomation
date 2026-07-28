@@ -377,6 +377,38 @@ class MobileAutomationServer(FastMCP):
             )
 
         @self.tool(
+            name="swipe_element",
+            description="在指定元素范围内执行方向滑动（适用于 SeekBar/Slider/开关等控件）。通过元素定位找到控件后，在其 bounds 范围内按方向滑动。",
+        )
+        def swipe_element(
+            device_name: str,
+            by: str,
+            value: str,
+            direction: str = "left",
+            percent: float = 0.8,
+            duration: int = 500,
+        ) -> dict:
+            """在指定元素范围内执行方向滑动。
+
+            适用于 SeekBar/Slider 等需要在一个控件内拖动的场景。
+            先通过定位策略找到元素，获取其 bounds，再在元素范围内按方向滑动。
+
+            Args:
+                device_name: 设备名称/标识符。
+                by: 定位方式 — "id" | "xpath" | "accessibility_id" | "text"。
+                value: 定位值。
+                direction: 滑动方向 — "left"/"right"/"up"/"down"，默认 "left"。
+                percent: 滑动距离占元素宽/高的比例（0.0-1.0），默认 0.8。
+                duration: 滑动持续时间（毫秒），默认 500ms。
+
+            Returns:
+                Dict: {"success": bool, "data": {...}} 格式的响应。
+            """
+            return self._ui_toolkit.swipe_element(
+                device_name, by, value, direction, percent, duration
+            )
+
+        @self.tool(
             name="wait_for_element",
             description="等待指定元素在设备屏幕中出现并可见",
         )
