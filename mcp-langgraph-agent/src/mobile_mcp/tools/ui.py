@@ -318,17 +318,20 @@ class UIToolkit:
             return {"success": False, "data": {"message": f"设备 '{device_name}' 未连接"}}
 
         try:
-            driver.execute_script(
-                "mobile: swipeGesture",
-                {
-                    "left": start_x,
-                    "top": start_y,
-                    "width": end_x - start_x,
-                    "height": end_y - start_y,
-                    "duration": duration,
-                    "direction": "custom",
-                },
-            )
+            # 零距离滑动检查：起终点相同时 driver.swipe 不报错但无效果
+            if start_x == end_x and start_y == end_y:
+                return {
+                    "success": False,
+                    "data": {
+                        "message": "滑动起终点相同，无法执行有效滑动",
+                        "start_x": start_x, "start_y": start_y,
+                        "end_x": end_x, "end_y": end_y,
+                    },
+                }
+
+            # 使用 W3C Actions API 的 driver.swipe 进行坐标式滑动
+            # mobile: swipeGesture 只支持 direction+percent（不支持任意坐标），不适合本场景
+            driver.swipe(start_x, start_y, end_x, end_y, duration)
 
             return {
                 "success": True,
@@ -475,6 +478,128 @@ class UIToolkit:
             return {
                 "success": False,
                 "data": {"message": f"滚动操作失败: {e!s}", "direction": direction, "error": str(e)},
+            }
+
+    def swipe_element(
+        self,
+        device_name: str,
+        by: str,
+        value: str,
+        direction: str = "left",
+        percent: float = 0.8,
+        duration: int = 500,
+    ) -> dict:
+        """在指定元素范围内执行方向滑动（适用于 SeekBar/Slider 等控件）。
+
+        先通过定位策略找到元素并获取其 bounds，然后在元素范围内
+        按指定方向和百分比执行坐标式滑动。
+
+        Args:
+            device_name: 设备名称/标识符。
+            by: 定位方式 — "id" | "xpath" | "accessibility_id" | "text"。
+            value: 定位值。
+            direction: 滑动方向 — "left"/"right"/"up"/"down"，默认 "left"。
+            percent: 滑动距离占元素宽/高的比例（0.0-1.0），默认 0.8。
+            duration: 滑动持续时间（毫秒），默认 500ms。
+
+        Returns:
+            Dict: 操作结果，包含 success 和 data 字段。
+        """
+        driver = self._check_device(device_name)
+        if driver is None:
+            return {"success": False, "data": {"message": f"设备 '{device_name}' 未连接"}}
+
+        valid_directions = {"left", "right", "up", "down"}
+        if direction.lower() not in valid_directions:
+            return {
+                "success": False,
+                "data": {
+                    "message": f"无效的滑动方向: '{direction}'，可选: {sorted(valid_directions)}",
+                    "direction": direction,
+                },
+            }
+
+        # 定位元素
+        strategy_map = {
+            "id": AppiumBy.ID,
+            "xpath": AppiumBy.XPATH,
+            "accessibility_id": AppiumBy.ACCESSIBILITY_ID,
+            "text": AppiumBy.ANDROID_UIAUTOMATOR,
+        }
+
+        try:
+            if by == "text":
+                selector = f'new UiSelector().textContains("{value}")'
+                element = driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
+            else:
+                strategy = strategy_map.get(by)
+                if strategy is None:
+                    return {
+                        "success": False,
+                        "data": {"message": f"不支持的定位方式: {by}", "by": by, "value": value},
+                    }
+                element = driver.find_element(strategy, value)
+
+            # 获取元素 bounds
+            el_location = element.location
+            el_size = element.size
+            el_x, el_y = el_location["x"], el_location["y"]
+            el_w, el_h = el_size["width"], el_size["height"]
+
+            # 根据方向计算滑动起终点
+            d = direction.lower()
+            if d == "right":
+                # 从元素左侧滑向右侧（增大值）
+                start_x = int(el_x + el_w * (1 - percent) / 2)
+                start_y = int(el_y + el_h / 2)
+                end_x = int(el_x + el_w * (1 + percent) / 2)
+                end_y = start_y
+            elif d == "left":
+                # 从元素右侧滑向左侧（减小值）
+                start_x = int(el_x + el_w * (1 + percent) / 2)
+                start_y = int(el_y + el_h / 2)
+                end_x = int(el_x + el_w * (1 - percent) / 2)
+                end_y = start_y
+            elif d == "down":
+                # 从元素顶部滑向底部（增大值）
+                start_x = int(el_x + el_w / 2)
+                start_y = int(el_y + el_h * (1 - percent) / 2)
+                end_x = start_x
+                end_y = int(el_y + el_h * (1 + percent) / 2)
+            else:  # up
+                # 从元素底部滑向顶部（减小值）
+                start_x = int(el_x + el_w / 2)
+                start_y = int(el_y + el_h * (1 + percent) / 2)
+                end_x = start_x
+                end_y = int(el_y + el_h * (1 - percent) / 2)
+
+            # 执行坐标式滑动
+            driver.swipe(start_x, start_y, end_x, end_y, duration)
+
+            return {
+                "success": True,
+                "data": {
+                    "message": f"在元素 [{by}={value}] 范围内 {direction} 方向滑动成功",
+                    "by": by, "value": value,
+                    "direction": direction, "percent": percent,
+                    "element_bounds": {"x": el_x, "y": el_y, "width": el_w, "height": el_h},
+                    "swipe": {"start_x": start_x, "start_y": start_y, "end_x": end_x, "end_y": end_y},
+                    "duration": duration,
+                },
+            }
+        except NoSuchElementException:
+            return {
+                "success": False,
+                "data": {"message": f"未找到元素 [{by}={value}]", "by": by, "value": value},
+            }
+        except Exception as e:  # noqa: BLE001
+            logger.error("元素滑动失败: %s", e)
+            return {
+                "success": False,
+                "data": {
+                    "message": f"元素滑动失败: {e!s}",
+                    "by": by, "value": value, "direction": direction, "error": str(e),
+                },
             }
 
     def wait_for_element(
