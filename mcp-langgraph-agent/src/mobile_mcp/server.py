@@ -420,19 +420,23 @@ class MobileAutomationServer(FastMCP):
             description="获取设备当前页面的 UI 无障碍树结构（压缩后的 JSON 格式）",
         )
         def get_ui_tree(
-            device_name: str, compress: bool = True
+            device_name: str, compress: bool = True, aggressive: bool = False
         ) -> Dict:
             """获取设备当前页面的 UI 无障碍树结构。
 
             Args:
                 device_name: 设备名称/标识符。
                 compress: 是否压缩输出（使用智能压缩器），默认为 True。
+                aggressive: 是否启用激进过滤模式，过滤无交互/无文本的装饰性
+                    叶子节点（如纯装饰 ImageView）。默认 False。启用后可
+                    进一步降低 Token 消耗，但状态语义类（ProgressBar/Switch/
+                    TextView 等）始终保留。仅在 compress=True 时生效。
 
             Returns:
                 Dict: {"success": bool, "data": {"tree": "...", ...}}。
             """
             return self._vision_toolkit.get_ui_tree(
-                device_name, compress
+                device_name, compress, aggressive=aggressive
             )
 
         # ---- 断言工具 ----

@@ -14,6 +14,25 @@ from typing import Annotated, List, Optional, TypedDict
 from langgraph.graph.message import add_messages
 
 
+def replace_if_non_empty(old: List, new: List) -> List:
+    """列表 reducer：新值非空 list 时整体替换，否则保留原值。
+
+    用于 test_plan 字段，支持重新规划场景下整体替换测试计划。
+    其他节点（executor/verifier/reviewer）不返回该字段时保持原值不变，
+    避免意外清空。首次规划时 old 为空列表，new 为完整计划，正常替换。
+
+    Args:
+        old: 当前 state 中的列表值
+        new: 节点返回的新列表值
+
+    Returns:
+        合并后的列表
+    """
+    if isinstance(new, list) and len(new) > 0:
+        return new
+    return old if old is not None else []
+
+
 class AgentState(TypedDict):
     """
     LangGraph 工作流的 Agent 状态定义。
@@ -41,8 +60,9 @@ class AgentState(TypedDict):
     """当前设备截图的 Base64 编码字符串。"""
 
     # ── 测试计划与执行 ────────────────────────────────────────────
-    test_plan: Annotated[List[dict], operator.add]
-    """测试步骤计划列表，每个元素包含 action/target/value/expected 等字段。"""
+    test_plan: Annotated[List[dict], replace_if_non_empty]
+    """测试步骤计划列表，每个元素包含 action/target/value/expected 等字段。
+    使用 replace_if_non_empty reducer，支持重新规划时整体替换计划。"""
 
     executed_steps: Annotated[List[dict], operator.add]
     """已执行步骤列表，每个元素包含 step, action, result, screenshot, passed 等字段。"""
@@ -59,6 +79,11 @@ class AgentState(TypedDict):
 
     retry_count: int
     """当前步骤已重试次数。"""
+
+    replan_count: int
+    """已触发的重新规划次数（防死循环）。
+    当 verifier 失败且重试超限时，路由到 explorer 重新感知+planner 重新规划，
+    每触发一次递增，达到 MAX_REPLAN_COUNT 时强制结束。"""
 
     # ── 设备信息 ──────────────────────────────────────────────────
     device_name: str

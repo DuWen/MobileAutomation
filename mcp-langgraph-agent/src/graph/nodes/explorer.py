@@ -168,7 +168,19 @@ async def explorer_node(state: AgentState) -> Dict[str, Any]:
             logger.warning(f"[Explorer] 设备连接异常: {e}")
 
     # 如果两者都缺失且设备已连接，尝试通过 HybridPerception 获取
-    if not ui_tree and not screenshot_b64 and device_name and device_connected:
+    # 二次进入（重新规划场景）时强制重新感知，获取当前最新界面
+    executed_steps: list = state.get('executed_steps', [])
+    is_replan_entry: bool = bool(executed_steps)
+    if is_replan_entry:
+        logger.info(
+            f"[Explorer] 检测到已执行 {len(executed_steps)} 步，判定为重新规划场景，"
+            f"强制重新感知当前界面（跳过 state 中缓存的旧 UI 树）"
+        )
+        # 清空旧感知数据，强制重新获取
+        ui_tree = ''
+        screenshot_b64 = ''
+
+    if (not ui_tree and not screenshot_b64) and device_name and device_connected:
         try:
             perception = HybridPerception(mcp_client=_mcp_client)
             result = await perception.perceive(device_name, mode=perception_mode)
@@ -220,6 +232,16 @@ async def explorer_node(state: AgentState) -> Dict[str, Any]:
         'matched_skills': [{'name': s.name, 'tags': s.tags} for s in matched_skills],
         'device_connected': device_connected,
     }
+
+    # 重新规划场景下递增 replan_count（防死循环计数）
+    if is_replan_entry:
+        current_replan_count: int = state.get('replan_count', 0)
+        result['replan_count'] = current_replan_count + 1
+        # 重新规划时重置 retry_count，让新计划有完整的重试机会
+        result['retry_count'] = 0
+        logger.info(
+            f"[Explorer] 重新规划计数: {current_replan_count} -> {current_replan_count + 1}"
+        )
 
     # 仅在有新感知数据时更新
     if ui_tree:

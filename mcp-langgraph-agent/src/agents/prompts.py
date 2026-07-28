@@ -83,6 +83,11 @@ PLANNER_PROMPT = """## 任务目标
 ## 探索分析结果
 {exploration_result}
 
+## 已执行步骤上下文
+{executed_steps_context}
+
+{replan_instruction}
+
 ## 输出要求
 请以 JSON 格式输出测试计划，包含以下字段：
 - `test_goal_restatement`: 对测试目标的重述，确保理解一致
@@ -163,7 +168,7 @@ EXECUTOR_PROMPT = """## 任务目标
 - `next_action`: 下一步建议（continue/retry/verify/abort）
 
 ## tool_actions 示例
-对于步骤 "输入 admin1 到账号输入框 (resource-id: com.zhongfu.emapp.debug:id/et_account)":
+对于步骤 "输入 admin1 到账号输入框 (resource-id: com.example:id/et_account)":
 ```json
 {{
   "tool_actions": [
@@ -171,7 +176,7 @@ EXECUTOR_PROMPT = """## 任务目标
       "tool": "input_text",
       "params": {{
         "by": "id",
-        "value": "com.zhongfu.emapp.debug:id/et_account",
+        "value": "com.example:id/et_account",
         "text": "admin1"
       }}
     }}

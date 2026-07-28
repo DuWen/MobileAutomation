@@ -707,20 +707,30 @@ def connect_device(
 # Tool 2: 获取无障碍树（精简版）
 # ═══════════════════════════════════════════════
 @mcp.tool()
-def get_ui_tree(max_depth: int = 5) -> str:
-    """获取当前页面的精简无障碍树，用于 LLM 分析 UI 结构.
+def get_ui_tree(device_name: str, compress: bool = True,
+                aggressive: bool = False) -> dict:
+    """获取设备当前页面的 UI 无障碍树结构（压缩后的 JSON 格式）.
 
     Args:
-        max_depth: 最大遍历深度，默认 5，防止 Token 过多
+        device_name: 设备名称/标识符
+        compress: 是否压缩输出（使用智能压缩器），默认 True
+        aggressive: 是否启用激进过滤模式，过滤无交互/无文本的装饰性
+            叶子节点（如纯装饰 ImageView）。默认 False 保持向后兼容。
+            启用后可进一步降低 30%-50% Token 消耗，但状态语义类
+            （ProgressBar/Switch/TextView 等）始终保留，确保 Verifier
+            断言与 Explorer 状态判断的准确性。仅在 compress=True 时生效。
     """
-    driver = _get_driver()
+    driver = _get_driver(device_name)
     xml = driver.page_source
 
-    # 精简处理：提取关键元素
+    if not compress:
+        return {"success": True, "data": {"tree": xml, "format": "xml"}}
+
+    # 精简处理：提取关键元素（aggressive=True 时启用本逻辑）
     import xml.etree.ElementTree as ET
     root = ET.fromstring(xml.encode("utf-8"))
 
-    def _prune(node, depth):
+    def _prune(node, depth, max_depth=8):
         if depth > max_depth:
             return None
         attrib = node.attrib
@@ -730,9 +740,11 @@ def get_ui_tree(max_depth: int = 5) -> str:
         desc = attrib.get("content-desc", "").strip()
         res_id = attrib.get("resource-id", "").strip()
 
-        # 仅保留可交互或有信息的节点
-        if not (clickable or editable or text or desc or res_id):
-            children = [_prune(c, depth + 1) for c in node]
+        # 仅保留可交互或有信息的节点（aggressive 模式行为）
+        # 注意：状态语义类（ProgressBar/Switch/TextView 等）应始终保留，
+        # 避免 Verifier 断言与 Explorer 状态判断失效
+        if aggressive and not (clickable or editable or text or desc or res_id):
+            children = [_prune(c, depth + 1, max_depth) for c in node]
             children = [c for c in children if c]
             return {"children": children} if children else None
 
@@ -745,12 +757,19 @@ def get_ui_tree(max_depth: int = 5) -> str:
         bounds = attrib.get("bounds", "")
         if bounds: record["bounds"] = bounds
 
-        children = [_prune(c, depth + 1) for c in node]
+        children = [_prune(c, depth + 1, max_depth) for c in node]
         record["children"] = [c for c in children if c]
         return record
 
     tree = _prune(root, 0)
-    return json.dumps(tree, ensure_ascii=False, indent=2)
+    return {
+        "success": True,
+        "data": {
+            "tree": json.dumps(tree, ensure_ascii=False),
+            "format": "json",
+            "aggressive": aggressive,
+        }
+    }
 
 
 # ═══════════════════════════════════════════════
@@ -947,6 +966,18 @@ from typing import TypedDict, Annotated, List
 from langgraph.graph.message import add_messages
 
 
+def replace_if_non_empty(old: List, new: List) -> List:
+    """列表 reducer：新值非空 list 时整体替换，否则保留原值。
+
+    用于 test_plan 字段，支持重新规划场景下整体替换测试计划。
+    其他节点（executor/verifier/reviewer）不返回该字段时保持原值不变，
+    避免意外清空。
+    """
+    if isinstance(new, list) and len(new) > 0:
+        return new
+    return old if old is not None else []
+
+
 class AgentState(TypedDict):
     """LangGraph 全图共享状态.
 
@@ -964,7 +995,11 @@ class AgentState(TypedDict):
     screenshot_b64: str    # 截图 base64
 
     # 测试计划与执行
-    test_plan: List[dict]  # [{"action": "tap", "target": {...}, ...}]
+    # test_plan 使用 replace_if_non_empty reducer：
+    #   - 首次规划时整体写入完整计划
+    #   - 重新规划时整体替换为剩余步骤计划（而非追加）
+    #   - 其他节点不返回该字段时保留原值
+    test_plan: Annotated[List[dict], replace_if_non_empty]
     executed_steps: List[dict]
     current_step_index: int
 
@@ -972,6 +1007,11 @@ class AgentState(TypedDict):
     verification_result: bool
     failure_reason: str
     retry_count: int
+
+    # 重新规划计数（防死循环）
+    # 当 verifier 失败且重试超限时，路由到 explorer 重新感知+planner 重新规划，
+    # 每触发一次递增，达到 MAX_REPLAN_COUNT（默认 2）时强制结束。
+    replan_count: int
 
     # 最终报告
     final_report: str</code></pre>
@@ -994,11 +1034,25 @@ llm_mini = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
 # Node 1: Explorer — 探索当前页面状态
 # ═══════════════════════════════════════════════
 def explorer_node(state: AgentState) -> dict:
-    """调用 MCP Tools 获取当前页面信息，为 Planner 提供上下文."""
+    """调用 MCP Tools 获取当前页面信息，为 Planner 提供上下文.
+
+    支持两种进入场景：
+    1. 首次进入（executed_steps 为空）：完整流程，含设备连接
+    2. 重新规划进入（executed_steps 非空）：跳过设备连接，强制重新感知
+       当前界面，并递增 replan_count，重置 retry_count
+    """
+    # 判断是否为重新规划场景
+    executed_steps = state.get("executed_steps", [])
+    is_replan_entry = bool(executed_steps)
+
     # 实际实现中通过 MCP Client 调用 Server 的工具
-    # 这里示意流程
-    ui_tree = _mcp_call("get_ui_tree", {"max_depth": 5})
-    screenshot = _mcp_call("take_screenshot", {"max_width": 1080})
+    # 重新规划场景下强制重新感知（state.ui_tree 已过期）
+    ui_tree = _mcp_call("get_ui_tree", {
+        "device_name": state["device_name"],
+        "compress": True,
+        "aggressive": False,  # Token 紧张时设为 True 过滤装饰性叶子节点
+    })
+    screenshot = _mcp_call("take_screenshot", {"device_name": state["device_name"]})
 
     # 用轻量模型分析页面结构
     prompt = f"""分析以下 UI 结构，描述当前页面状态：
@@ -1015,18 +1069,32 @@ def explorer_node(state: AgentState) -> dict:
 
     response = llm_mini.invoke([SystemMessage(content="你是移动端测试专家"), HumanMessage(content=prompt)])
 
-    return {
+    result = {
         "ui_tree": ui_tree,
         "screenshot_b64": screenshot,
         "messages": [HumanMessage(content=f"[Explorer] 页面分析: {response.content}")],
     }
+
+    # 重新规划场景下递增 replan_count，重置 retry_count
+    if is_replan_entry:
+        result["replan_count"] = state.get("replan_count", 0) + 1
+        result["retry_count"] = 0  # 让新计划有完整的重试机会
+
+    return result
 
 
 # ═══════════════════════════════════════════════
 # Node 2: Planner — 生成测试计划
 # ═══════════════════════════════════════════════
 def planner_node(state: AgentState) -> dict:
-    """根据测试目标和当前页面状态，生成详细的测试步骤计划."""
+    """根据测试目标和当前页面状态，生成详细的测试步骤计划.
+
+    支持两种规划场景：
+    1. 首次规划（executed_steps 为空）：生成完整测试计划
+    2. 重新规划（executed_steps 非空）：传入已执行步骤作为上下文，
+       仅生成剩余未完成步骤。test_plan 通过 replace_if_non_empty
+       reducer 整体替换为新计划，current_step_index 重置为 0。
+    """
     prompt = f"""你是移动端测试规划专家。
 
 测试目标：{state["test_goal"]}
@@ -1153,18 +1221,37 @@ def build_test_graph() -> StateGraph:
     graph.add_edge("planner", "executor")
     graph.add_edge("executor", "verifier")
 
+    # 最大重试次数与最大重新规划次数
+    MAX_RETRIES = 3
+    MAX_REPLAN_COUNT = 2
+
     # 条件路由：根据验证结果决定下一步
-    def route_after_verification(state: AgentState) -> Literal["retry", "next", "passed"]:
-        """验证后的路由决策逻辑."""
+    # 新增 "replan" 路由：重试超限且重新规划次数未超限时，
+    # 回到 explorer 重新感知当前界面，再到 planner 重新规划剩余步骤。
+    # 解决多级页面跳转后元素定位失败问题（Explorer 只感知首页会导致
+    # Planner 生成的步骤在二/三级页面找不到元素）。
+    def route_after_verification(state: AgentState) -> Literal["retry", "next", "passed", "replan"]:
+        """验证后的路由决策逻辑.
+
+        - passed (验证通过):
+            - 还有下一步 → "next"（继续执行）
+            - 所有步骤完成 → "passed"（进入审查/结束）
+        - failed (验证失败):
+            - retry_count < MAX_RETRIES → "retry"（重试当前步骤）
+            - retry_count >= MAX_RETRIES:
+                - replan_count < MAX_REPLAN_COUNT → "replan"（重新感知+重新规划）
+                - replan_count >= MAX_REPLAN_COUNT → "passed"（重新规划超限，结束）
+        """
         if state["verification_result"]:
-            # 检查是否还有后续步骤
             if state["current_step_index"] < len(state["test_plan"]):
-                return "next"  # 继续执行下一步
-            return "passed"   # 全部通过，结束
-        elif state["retry_count"] < 3:
-            return "retry"    # 重试当前步骤
+                return "next"
+            return "passed"
+        elif state["retry_count"] < MAX_RETRIES:
+            return "retry"
+        elif state.get("replan_count", 0) < MAX_REPLAN_COUNT:
+            return "replan"   # 重试超限，触发重新规划
         else:
-            return "passed"   # 重试超限，结束并标记失败
+            return "passed"   # 重新规划超限，结束并标记失败
 
     graph.add_conditional_edges(
         "verifier",
@@ -1172,6 +1259,7 @@ def build_test_graph() -> StateGraph:
         {
             "next": "executor",      # 继续执行下一步
             "retry": "executor",     # 重试当前步骤
+            "replan": "explorer",    # 重新感知+重新规划（回到 explorer）
             "passed": END,           # 结束
         }
     )
@@ -1195,6 +1283,7 @@ if __name__ == "__main__":
         "verification_result": False,
         "failure_reason": "",
         "retry_count": 0,
+        "replan_count": 0,  # 重新规划计数，防死循环
         "final_report": "",
     }
 

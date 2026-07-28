@@ -76,12 +76,31 @@ async def planner_node(state: AgentState) -> Dict[str, Any]:
     # 提取探索结果
     explorer_output: dict = state.get('node_outputs', {}).get('explorer', {})
 
-    # 调用 Agent 执行规划
+    # ── 增量规划：检测是否为重新规划场景 ─────────────────────────
+    # 当 verifier 失败超限后路由到 explorer 再到 planner 时，
+    # state.executed_steps 非空，此时应保留已通过步骤，仅规划剩余步骤
+    executed_steps: List[dict] = state.get('executed_steps', [])
+    is_replan: bool = bool(executed_steps)
+
+    # 统计已通过的步骤数（作为新计划的起始索引）
+    passed_steps_count: int = sum(
+        1 for s in executed_steps if isinstance(s, dict) and s.get('passed', False)
+    ) if executed_steps else 0
+
+    if is_replan:
+        logger.info(
+            f"[Planner] 检测到重新规划场景：已执行 {len(executed_steps)} 步，"
+            f"其中 {passed_steps_count} 步通过，仅规划剩余步骤"
+        )
+
+    # 调用 Agent 执行规划（传入已执行步骤作为上下文）
     plan_result: Dict[str, Any] = await agent.run(
         test_goal=state.get('test_goal', ''),
         ui_tree=state.get('ui_tree', ''),
         screenshot_b64=state.get('screenshot_b64', ''),
         exploration_result=explorer_output,
+        executed_steps=executed_steps if is_replan else None,
+        is_replan=is_replan,
     )
 
     # 提取测试步骤列表
@@ -95,27 +114,40 @@ async def planner_node(state: AgentState) -> Dict[str, Any]:
         elif isinstance(plan_dict, list):
             test_steps = plan_dict
 
+    # 重新规划场景：新计划只包含剩余步骤（test_plan 已被 replace_if_non_empty
+    # 整体替换），current_step_index 从 0 开始
+    # 首次规划场景：current_step_index 也从 0 开始
+    new_step_index: int = 0
+
     # 获取本轮 Token 消耗
     token_summary: Dict[str, Any] = agent.get_token_summary()
     tokens_used: int = token_summary.get('total_tokens', 0)
 
-    logger.info(f"[Planner] 规划完成，共 {len(test_steps)} 个步骤")
+    plan_mode_desc = "重新规划（仅剩余步骤）" if is_replan else "首次规划"
+    logger.info(
+        f"[Planner] {plan_mode_desc}完成，共 {len(test_steps)} 个步骤"
+    )
 
     return {
         'test_plan': test_steps,
-        'current_step_index': 0,
+        'current_step_index': new_step_index,
         'retry_count': 0,
         'node_outputs': {
             **state.get('node_outputs', {}),
             'planner': {
                 'total_steps': len(test_steps),
                 'steps': test_steps,
+                'is_replan': is_replan,
+                'passed_steps_before_replan': passed_steps_count,
             },
         },
         'messages': [
             {
                 'role': 'assistant',
-                'content': f"规划完成，生成 {len(test_steps)} 个测试步骤",
+                'content': (
+                    f"{'重新规划' if is_replan else '规划'}完成，"
+                    f"生成 {len(test_steps)} 个测试步骤"
+                ),
             },
         ],
         'total_tokens_used': state.get('total_tokens_used', 0) + tokens_used,

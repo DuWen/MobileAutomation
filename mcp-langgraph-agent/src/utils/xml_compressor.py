@@ -64,6 +64,28 @@ _INTERACTIVE_CONTAINERS: Set[str] = {
     'android.support.v7.widget.RecyclerView',
 }
 
+# 纯装饰类黑名单：aggressive 模式下，这些类名的叶子节点若无交互/文本则过滤
+_PURE_DECORATIVE_CLASSES: Set[str] = {
+    'android.widget.ImageView',
+    'android.widget.Space',
+    'android.view.View',
+    'android.graphics.drawable.BitmapDrawable',
+}
+
+# 状态语义类白名单：aggressive 模式下也强制保留（承载页面状态语义）
+# 这些节点可能无交互属性，但对 Verifier 断言与 Explorer 状态判断至关重要
+_STATE_CLASSES: Set[str] = {
+    'android.widget.ProgressBar',          # 加载状态
+    'android.widget.Switch',               # 开关状态
+    'android.widget.CheckBox',             # 勾选状态
+    'android.widget.RadioButton',          # 单选状态
+    'android.widget.TextView',             # 文本类一律保留（避免 Toast/提示文案丢失）
+    'android.widget.EditText',             # 输入框（可能无 clickable 但有 focusable）
+    'android.widget.Button',               # 按钮类一律保留
+    'android.widget.ImageButton',          # 图标按钮
+    'android.widget.CheckedTextView',      # 带勾选状态的文本
+}
+
 
 def _filter_attributes(attrs: Dict[str, str]) -> Dict[str, str]:
     """过滤属性，仅保留白名单中的属性。
@@ -123,11 +145,60 @@ def _is_redundant_container(
     return True
 
 
+def _is_meaningful_leaf(attrs: Dict[str, str]) -> bool:
+    """判断叶子节点是否值得保留（aggressive 模式下使用）。
+
+    判定规则按优先级：
+    1. 有交互属性（clickable/checkable/scrollable/long-clickable=true）→ 保留
+    2. 有文本内容（text/content-desc 非空）→ 保留
+    3. 有 resource-id（可定位标识）→ 保留
+    4. 类名在状态类白名单中（ProgressBar/Switch/TextView 等）→ 保留
+    5. 类名在纯装饰类黑名单中（ImageView/Space 等）→ 过滤
+    6. 其他未知类名 → 默认保留（避免误杀自定义控件）
+
+    Args:
+        attrs: 已过滤后的节点属性字典
+
+    Returns:
+        是否保留该叶子节点
+    """
+    # 1. 交互属性判断
+    is_clickable = attrs.get('clickable', 'false').lower() == 'true'
+    is_checkable = attrs.get('checkable', 'false').lower() == 'true'
+    is_scrollable = attrs.get('scrollable', 'false').lower() == 'true'
+    is_long_clickable = attrs.get('long-clickable', 'false').lower() == 'true'
+    if is_clickable or is_checkable or is_scrollable or is_long_clickable:
+        return True
+
+    # 2. 文本内容判断
+    has_text = bool(attrs.get('text', '').strip())
+    has_desc = bool(attrs.get('content-desc', '').strip())
+    if has_text or has_desc:
+        return True
+
+    # 3. resource-id 判断（可定位标识）
+    if attrs.get('resource-id', '').strip():
+        return True
+
+    # 4. 状态类白名单判断
+    class_name = attrs.get('class', '')
+    if class_name in _STATE_CLASSES:
+        return True
+
+    # 5. 纯装饰类黑名单判断
+    if class_name in _PURE_DECORATIVE_CLASSES:
+        return False
+
+    # 6. 其他未知类名默认保留（保守策略，避免误杀自定义控件）
+    return True
+
+
 def _node_to_dict(
     node: Dict[str, Any],
     current_depth: int,
     max_depth: int,
     max_children: int,
+    aggressive: bool = False,
 ) -> Dict[str, Any] | None:
     """递归将 XML 节点转换为精简字典。
 
@@ -140,6 +211,9 @@ def _node_to_dict(
         current_depth: 当前递归深度
         max_depth: 最大允许深度
         max_children: 每个节点最大子节点数
+        aggressive: 是否启用激进过滤模式，过滤无交互/无文本的装饰性
+            叶子节点。仅对叶子节点（无原始子节点）生效，不影响容器
+            层级结构。默认 False 保持向后兼容。
 
     Returns:
         精简后的节点字典，如果该节点被过滤则返回 None
@@ -164,6 +238,7 @@ def _node_to_dict(
                 current_depth,  # 深度不递增，因为当前节点被跳过
                 max_depth,
                 max_children,
+                aggressive=aggressive,
             )
             if child_result is not None:
                 promoted.append(child_result)
@@ -187,9 +262,16 @@ def _node_to_dict(
             current_depth + 1,
             max_depth,
             max_children,
+            aggressive=aggressive,
         )
         if child_result is not None:
             processed_children.append(child_result)
+
+    # aggressive 模式下，对叶子节点（无原始子节点）进行语义过滤
+    # 仅过滤纯装饰性叶子（如无文本的 ImageView），保留状态语义类
+    if aggressive and not original_children:
+        if not _is_meaningful_leaf(filtered_attrs):
+            return None
 
     # 构建结果节点
     result: Dict[str, Any] = {
@@ -264,6 +346,7 @@ def compress_xml(
     xml_str: str,
     max_depth: int = 8,
     max_children: int = 20,
+    aggressive: bool = False,
 ) -> str:
     """压缩 Appium 无障碍树 XML。
 
@@ -275,6 +358,12 @@ def compress_xml(
         xml_str: 原始 Appium 无障碍树 XML 字符串
         max_depth: 最大保留深度，超过此深度的节点将被截断，默认 8
         max_children: 每个节点最大保留子节点数，默认 20
+        aggressive: 是否启用激进过滤模式，过滤无交互/无文本的装饰性
+            叶子节点（如纯装饰 ImageView）。默认 False 保持向后兼容。
+            启用后可进一步降低 30%-50% Token 消耗，但会丢失部分纯
+            展示元素。注意：状态语义类（ProgressBar/Switch/TextView 等）
+            不受此参数影响，始终保留，以确保 Verifier 断言与 Explorer
+            状态判断的准确性。
 
     Returns:
         压缩后的 JSON 字符串
@@ -285,7 +374,7 @@ def compress_xml(
         return json.dumps({'error': '无法解析 XML', 'compressed_tree': {}}, ensure_ascii=False)
 
     # 压缩节点树
-    compressed = _node_to_dict(tree, 0, max_depth, max_children)
+    compressed = _node_to_dict(tree, 0, max_depth, max_children, aggressive=aggressive)
 
     # 计算压缩率统计
     original_size = len(xml_str.encode('utf-8'))

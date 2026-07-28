@@ -106,15 +106,33 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
     if skill_context:
         agent.set_skill_context(skill_context)
 
+    # ── 关键改动：每步执行前刷新 UI 树 ──────────────────────────
+    # 解决多级页面跳转后元素定位失败问题：
+    # 旧实现使用 Explorer 阶段采集的首页 UI 树，跳转到二/三级页面后
+    # LLM 仍按旧 UI 树定位元素，导致 tap_element 找不到目标。
+    # 现在每步执行前重新获取当前页面的 UI 树，确保 LLM 看到的是真实当前界面。
+    fresh_ui_tree: str = state.get('ui_tree', '')
+    device_name: str = state.get('device_name', '')
+    if agent.mcp_client and device_name:
+        try:
+            ui_result = await agent.mcp_client.call_tool(
+                'get_ui_tree', {'device_name': device_name, 'compress': True}
+            )
+            if isinstance(ui_result, dict) and ui_result.get('success', False):
+                fresh_ui_tree = ui_result.get('data', {}).get('tree', fresh_ui_tree)
+                logger.info(f"[Executor] 步骤 [{current_step_index + 1}] 已刷新 UI 树")
+        except Exception as e:
+            logger.warning(f"[Executor] 刷新 UI 树失败，使用旧 UI 树: {e}")
+
     # 调用 Agent 执行步骤
     execution_record: Dict[str, Any] = await agent.run(
         current_step=step_desc,
         current_step_index=current_step_index,
-        ui_tree=state.get('ui_tree', ''),
+        ui_tree=fresh_ui_tree,
         screenshot_b64=state.get('screenshot_b64', ''),
         test_plan=test_plan,
         executed_steps=state.get('executed_steps', []),
-        device_name=state.get('device_name', ''),
+        device_name=device_name,
     )
 
     # 获取本轮 Token 消耗
@@ -132,6 +150,8 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
             **state.get('node_outputs', {}),
             'executor': execution_record,
         },
+        # 同步更新 state.ui_tree，让后续 verifier 看到最新界面
+        'ui_tree': fresh_ui_tree,
         'messages': [
             {
                 'role': 'assistant',

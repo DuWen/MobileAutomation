@@ -156,7 +156,7 @@ class VisionToolkit:
             }
 
     def get_ui_tree(
-        self, device_name: str, compress: bool = True
+        self, device_name: str, compress: bool = True, aggressive: bool = False
     ) -> Dict:
         """获取设备当前页面的 UI 无障碍树结构。
 
@@ -167,12 +167,17 @@ class VisionToolkit:
             device_name: 设备名称/标识符。
             compress: 是否压缩输出，为 True 时使用智能压缩器输出 JSON 格式。
                 默认为 True。
+            aggressive: 是否启用激进过滤模式，过滤无交互/无文本的装饰性
+                叶子节点（如纯装饰 ImageView）。默认 False 保持向后兼容。
+                启用后可进一步降低 Token 消耗，但状态语义类（ProgressBar/
+                Switch/TextView 等）始终保留。仅在 compress=True 时生效。
 
         Returns:
             Dict: 操作结果，包含 success 和 data 字段。
                 - success: 是否成功
                 - data.tree: UI 无障碍树结构（压缩后为 JSON 字符串，未压缩为 XML 字符串）
                 - data.compressed: 是否已压缩
+                - data.aggressive: 是否启用了激进过滤模式
         """
         driver = self._check_device(device_name)
         if driver is None:
@@ -183,13 +188,14 @@ class VisionToolkit:
 
             if compress:
                 # 使用 xml_compressor 进行智能压缩（输出 JSON 格式）
-                compressed_tree = compress_xml(page_source)
+                compressed_tree = compress_xml(page_source, aggressive=aggressive)
                 return {
                     "success": True,
                     "data": {
                         "tree": compressed_tree,
                         "format": "json",
                         "compressed": True,
+                        "aggressive": aggressive,
                         "original_size": len(page_source),
                         "compressed_size": len(compressed_tree),
                         "device_name": device_name,
@@ -202,6 +208,7 @@ class VisionToolkit:
                         "tree": page_source,
                         "format": "xml",
                         "compressed": False,
+                        "aggressive": False,
                         "size": len(page_source),
                         "device_name": device_name,
                     },

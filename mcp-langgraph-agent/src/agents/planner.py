@@ -58,6 +58,8 @@ class PlannerAgent(BaseAgent):
                 - ui_tree: 当前界面 UI 树
                 - screenshot_b64: 当前界面截图 Base64
                 - exploration_result: 探索节点的输出结果
+                - executed_steps: 已执行步骤列表（重新规划场景传入）
+                - is_replan: 是否为重新规划场景
 
         Returns:
             测试计划字典，包含 goal, steps, expected_results 等字段
@@ -66,6 +68,8 @@ class PlannerAgent(BaseAgent):
         ui_tree: str = kwargs.get('ui_tree', '')
         screenshot_b64: str = kwargs.get('screenshot_b64', '')
         exploration_result: dict = kwargs.get('exploration_result', {})
+        executed_steps: list = kwargs.get('executed_steps', None) or []
+        is_replan: bool = kwargs.get('is_replan', False)
 
         # 构建消息序列
         messages = [
@@ -76,6 +80,13 @@ class PlannerAgent(BaseAgent):
                     ui_tree=ui_tree or '(未提供)',
                     screenshot_description='有截图' if screenshot_b64 else '无截图',
                     exploration_result=str(exploration_result),
+                    executed_steps_context=str(executed_steps) if is_replan else '(无)',
+                    replan_instruction=(
+                        '## 重新规划场景\n'
+                        '前置步骤已部分执行（见上方"已执行步骤"），请基于当前界面 UI 树\n'
+                        '和已通过步骤，仅规划**剩余未完成**的步骤。不要重复规划已通过步骤。\n'
+                        '步骤编号从 1 开始重新计数。'
+                    ) if is_replan else '(无)'
                 ),
             },
             {
